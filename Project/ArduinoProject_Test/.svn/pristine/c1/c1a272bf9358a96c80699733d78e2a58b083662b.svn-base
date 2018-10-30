@@ -1,0 +1,20 @@
+#pragma once
+#include "pt-1.4/PtThreadEx.h"
+typedef enum _TASK_INDEX
+{
+	// add your task here
+	TKIN_TIMER = 0,
+	TKIN_CESU,
+	TKIN_CONFIG,
+	//////////////////////////////////////////////////////////////////////////
+	TASKS_MAX                       // total task number = 6
+} TASK_INDEX;
+#define SCHED_MAX (TASKS_MAX)
+
+class DataInterface
+{
+public:
+	DataInterface();
+	~DataInterface();
+};
+

@@ -1,0 +1,72 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="UnlockFifoBuffer">
+      <UniqueIdentifier>{ccf17336-d24c-492f-a127-5db37b51b47d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="pt">
+      <UniqueIdentifier>{388ce8fd-e5c7-48b5-85d0-d890d0940c38}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Timer">
+      <UniqueIdentifier>{06ed3325-acf5-4ff5-bacb-90ac3e9a34a7}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="ArduinoProject_Test.ino" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="__vm\.ArduinoProject_Test.vsarduino.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="UnlockFifoBuffer\UnlockFifoBuffer.h">
+      <Filter>UnlockFifoBuffer</Filter>
+    </ClInclude>
+    <ClInclude Include="pt-1.4\lc.h">
+      <Filter>pt</Filter>
+    </ClInclude>
+    <ClInclude Include="pt-1.4\lc-addrlabels.h">
+      <Filter>pt</Filter>
+    </ClInclude>
+    <ClInclude Include="pt-1.4\lc-switch.h">
+      <Filter>pt</Filter>
+    </ClInclude>
+    <ClInclude Include="pt-1.4\pt.h">
+      <Filter>pt</Filter>
+    </ClInclude>
+    <ClInclude Include="pt-1.4\pt-sem.h">
+      <Filter>pt</Filter>
+    </ClInclude>
+    <ClInclude Include="pt-1.4\PtThreadEx.h">
+      <Filter>pt</Filter>
+    </ClInclude>
+    <ClInclude Include="DataInterface.h" />
+    <ClInclude Include="pt-1.4\BSP_cfg.h" />
+    <ClInclude Include="pt-1.4\Timer\Timer.h">
+      <Filter>Timer</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="UnlockFifoBuffer\UnlockFifoBuffer.cpp">
+      <Filter>UnlockFifoBuffer</Filter>
+    </ClCompile>
+    <ClCompile Include="pt-1.4\PtThreadEx.cpp">
+      <Filter>pt</Filter>
+    </ClCompile>
+    <ClCompile Include="DataInterface.cpp" />
+    <ClCompile Include="pt-1.4\Timer\Timer.cpp">
+      <Filter>Timer</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>

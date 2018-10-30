@@ -1,0 +1,15 @@
+{
+  "version": "0.2.1",
+  "tasks": [
+    {
+      "taskName": "任务-DSP_PROJECT_4th",
+      "appliesTo": "/",
+      "type": "launch"
+    },
+    {
+      "taskName": "任务-DSP_PROJECT_4th",
+      "appliesTo": "/",
+      "type": "launch"
+    }
+  ]
+}

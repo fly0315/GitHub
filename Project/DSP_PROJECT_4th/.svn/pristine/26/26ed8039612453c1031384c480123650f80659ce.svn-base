@@ -1,0 +1,453 @@
+/*
+ * DataInterfaceCZT.cpp
+ *
+ *  Created on: 2018年2月28日
+ *      Author: ABC
+ */
+
+#include <string.h>
+#include <stdlib.h>
+#include "DataInterfaceCZT.h"
+SciCztMp CztMp_Hor_;
+SciCztMp CztMp_Ver_;
+IoCztBtnSw CztBtnSw_;
+SpiCzt93C56 Czt93C56_;
+CztDataBase CztData_;
+SciCztMp::SciCztMp():
+        m_i16Code(0),
+        m_i16Position(0),
+		m_bIsDataRcvd(0)
+
+{
+    // TODO Auto-generated constructor stub
+
+
+}
+
+void SciCztMp::InitData()
+{
+    m_i16Code = 0;
+    m_i16Position = 0;
+	m_bIsDataRcvd = 0;
+}
+
+IoCztBtnSw::IoCztBtnSw()
+{
+    // TODO Auto-generated constructor stub
+	m_SampleBuffer_IO = NULL;
+    // 31,30,29,28|{27,26,25,24|23,22,21,20|19,18,17,16}|15,14,13,12|11,10,9,8|7,{6,5,4|3,2},1,0
+    m_Btn_Sw_IO.All = BTN_SW_INIT_STATE;
+	// 31,30,29,28|{27,26,25,24|23,22,21,20|19,18,17,16}|15,14,13,12|11,10,9,8|{7,6,5},4|3,2,1,0
+
+}
+
+IoCztBtnSw::~IoCztBtnSw()
+{
+	delete[] m_SampleBuffer_IO;
+	m_SampleBuffer_IO = NULL;
+}
+
+void IoCztBtnSw::BtnIOSampling(volatile unsigned long* pIOs)
+{
+    // IOs
+	// 1.Get write-zero IO state.
+    m_Btn_Sw_IO.data.ZERO_SW = (*pIOs & 0x00000004) >> 2;
+
+    // Buttons and Switches that need to be debounced.
+	// 2.Put into a ring buffer.
+    m_SampleBuffer_IO[m_IOBufferIndex] = *pIOs;
+    (++m_IOBufferIndex) &= (m_SampleCnt - 1);	// ring-buffer index round in.
+
+//     if ((*pIOs & DEBOUNCE_MASK) != (m_Btn_Sw_IO.All & DEBOUNCE_MASK))
+//     {
+//         Debounce();
+//     }
+	// 3.Debounce. (Sampled_IO_Data ^ PreIO_State) == 0 ? NoChange : Changed.
+	DebounceEx((*pIOs & DEBOUNCE_MASK) ^ (m_Btn_Sw_IO.All & DEBOUNCE_MASK));
+}
+
+unsigned long IoCztBtnSw::roundup_power_of_two(unsigned long val)
+{
+    if((val & (val-1)) == 0)
+        return val;
+
+    unsigned long maxulong = (unsigned long)((unsigned long)~0);
+    unsigned long andv = ~(maxulong&(maxulong>>1));
+    while((andv & val) == 0)
+        andv = andv>>1;
+
+    return andv<<1;
+}
+
+void IoCztBtnSw::Init(unsigned int SampleCnt)
+{
+    m_SampleCnt = SampleCnt;
+    if (!Is_Power_Of_2(m_SampleCnt))
+    {
+        m_SampleCnt = roundup_power_of_two(m_SampleCnt);
+    }
+    m_IOBufferIndex = 0;
+    m_SampleBuffer_IO = new unsigned long[m_SampleCnt];
+
+    for (int i = 0; i < m_SampleCnt; i++)
+    {
+        m_SampleBuffer_IO[i] = BTN_SW_INIT_STATE;
+    }
+    unsigned int SamplePin[PinCnt_BTN_SW] = { SA1_L, SA2_L, SA2_H, SB1_L, SB2_L,
+        SB3_L1, SB3_L2, SB4_L, SB5_L, SB6_L1, SB6_L2, SC1, SC2, SC3, SC4 };
+    for (int i = 0; i < PinCnt_BTN_SW; ++i)
+    {
+        m_SamplePin[i] = SamplePin[i];
+    }
+}
+/**
+ * 防抖对4TH_CZT上所有种类开关按钮都有效果。
+ * 使用GPIO输出示波器查看方法测试防抖效果。20180305--刘宾、任峰
+ */
+void IoCztBtnSw::Debounce()
+{
+    unsigned int value[PinCnt_BTN_SW] = { 0 };
+    for (int i = 0; i < PinCnt_BTN_SW; ++i)
+    {
+        for (int j = 0; j < m_SampleCnt; ++j)
+        {
+            value[i] += ((m_SampleBuffer_IO[j] >> m_SamplePin[i]) & 1);
+        }
+        // Preponderance state.
+		if (value[i] > (unsigned int)((float)m_SampleCnt * PREPONDERANCE_IO))
+		{
+			CztBtnSw_.m_Btn_Sw_IO.All |= ((unsigned long)1 << m_SamplePin[i]);		// 1
+		}
+		else if (value[i] < (unsigned int)((float)m_SampleCnt * (1 - PREPONDERANCE_IO)))
+		{
+			CztBtnSw_.m_Btn_Sw_IO.All &= (~((unsigned long)1 << m_SamplePin[i]));	// 0
+		}
+		else
+		{
+			// No preponderance state and keep IO state no change.
+			// Do nothing.
+		}
+    }
+}
+
+void IoCztBtnSw::DebounceEx(unsigned long ChangedBit)
+{
+	if (0 == ChangedBit) {return;}// No Change return.
+	
+	unsigned int value = 0;
+	static unsigned int Preponderance_H = (unsigned int)((float)m_SampleCnt * PREPONDERANCE_IO);
+	static unsigned int Preponderance_L = (unsigned int)((float)m_SampleCnt * (1 - PREPONDERANCE_IO));
+	for (int i = 0; i < PinCnt_BTN_SW; i++)
+	{
+		// Step 1.Find changed IO
+		if ((ChangedBit >> m_SamplePin[i]) & 1)
+		{
+			// Step 2.Add this IO states.
+			for (int j = 0; j < m_SampleCnt; j++)
+			{
+				value += ((m_SampleBuffer_IO[j] >> m_SamplePin[i]) & 1);
+			}
+			// Step 3.Calculate preponderance state High/Low/None and set 1/0/no-change.
+			if (value > Preponderance_H)
+			{
+				CztBtnSw_.m_Btn_Sw_IO.All |= ((unsigned long)1 << m_SamplePin[i]);		// State high (1).
+			}
+			else if (value < Preponderance_L)
+			{
+				CztBtnSw_.m_Btn_Sw_IO.All &= (~((unsigned long)1 << m_SamplePin[i]));	// State low (0).
+			}
+			else
+			{
+				// No preponderance state and keep IO state no change.
+				// Do nothing.
+			}
+		}
+	}
+}
+// 93C56数据
+SpiCzt93C56::SpiCzt93C56():AT93C56(0,0,0,0)
+{
+    // TODO Auto-generated constructor stub
+    m_i16Zero_H = 0;
+    m_i16Zero_V = 0;
+    m_WriteCNT = 0;
+}
+
+void SpiCzt93C56::InitEEPROM(void)
+{
+    AT93C56.Init();
+}
+
+void SpiCzt93C56::WriteZeroCode_X(ENCODER_X Encoder_X, unsigned int ZeroCode)
+{
+    m_WriteCNT++;
+    if (m_WriteCNT <= 10)
+    {
+        AT93C56.EWEN();
+        AT93C56.WRITE(ZeroCode, Encoder_X);
+        AT93C56.EWDS();
+    }
+
+}
+
+CztDataBase::CztDataBase()
+	:m_PowerOnInitState_H(1),
+	m_PowerOnInitState_V(1),
+	m_AimSignal_H(0),
+	m_AimSignal_V(0),
+	m_ZeroCode_H(0),
+	m_ZeroCode_V(0),
+	m_LedState(STATE_LED_NORMAL),
+	m_LampState_H(STATE_LAMP_NONE),
+	m_LampState_V(STATE_LAMP_NONE),
+	m_Fr_Offline(STATE_LAMP_NONE),
+	m_bHighSpeed_H(0),
+	m_bHighSpeed_V(0)
+{
+	m_Fr_Word_IO.All = 0;
+}
+
+unsigned int CztDataBase::IsWriteZeroRight_MPvsROM_H(unsigned int E2PROM_ZERO_H)
+{
+// 	if (
+// 		(RoundIn8191(m_ZeroCode_H - E2PROM_ZERO_H) >= RoundIn8191(8192 - E2PROM_ZERO_ERRO))
+// 		|| (RoundIn8191(m_ZeroCode_H - E2PROM_ZERO_H) <= E2PROM_ZERO_ERRO)
+// 		)
+// 	{
+// 		return 1;
+// 	}
+// 	else
+// 	{
+// 		return 0;
+// 	}
+	return (
+		(RoundIn8191(m_ZeroCode_H - E2PROM_ZERO_H) >= RoundIn8191(8192 - E2PROM_ZERO_ERRO))
+		||
+		(RoundIn8191(m_ZeroCode_H - E2PROM_ZERO_H) <= E2PROM_ZERO_ERRO)
+		) ? 1 : 0;
+}
+
+unsigned int CztDataBase::IsWriteZeroRight_MPvsROM_V(unsigned int E2PROM_ZERO_V)
+{
+// 	if (
+// 		(RoundIn8191(m_ZeroCode_V - E2PROM_ZERO_V) >= RoundIn8191(8192 - E2PROM_ZERO_ERRO))
+// 		|| (RoundIn8191(m_ZeroCode_V - E2PROM_ZERO_V) <= E2PROM_ZERO_ERRO)
+// 		)
+// 	{
+// 		return 1;
+// 	}
+// 	else
+// 	{
+// 		return 0;
+// 	}
+	return (
+		(RoundIn8191(m_ZeroCode_V - E2PROM_ZERO_V) >= RoundIn8191(8192 - E2PROM_ZERO_ERRO))
+		||
+		(RoundIn8191(m_ZeroCode_V - E2PROM_ZERO_V) <= E2PROM_ZERO_ERRO)
+		) ? 1 : 0;
+}
+
+int CztDataBase::Code2AimSignal_H(int Code_H)
+{
+	// 0.Move to baseline and save signed.
+	Code_H = CodeOnBaseline(Code_H, m_ZeroCode_H);
+	// 防止码盘松动造成码盘值跨界（正负界）。
+	static int preCode = 0;
+	if (0 == m_PowerOnInitState_H)
+	{
+		if (abs(Code_H - preCode) < 4096)
+		{
+			preCode = Code_H;
+			m_LampState_H = STATE_LAMP_NORMAL_H;
+		}
+		else
+		{
+			Code_H = preCode;
+			m_LampState_H = STATE_LAMP_ZERO_ERROR_H;
+		}
+	}
+	else
+	{
+		m_LampState_H = STATE_LAMP_ZERO_INIT_H;
+	}
+	// Reverse value,For Aim-Signal and MP-code are opposite to each other.
+    int SIGNED = ((Code_H < 0) ? (1) : (-1));
+	// 1.Absolution.
+    Code_H = abs(Code_H);
+	// 2.Convert code to angle.
+	float angle = Code2Angle(Code_H);
+	// 3.Interval judgment.
+	if (angle <= ANGLE_MAX_SPEED_H)
+	{
+		m_bHighSpeed_H = 0;
+		if (angle <= ANGLE_ZERO_H)
+		{
+			m_AimSignal_H = 0;
+		}
+		else if (angle >= ANGLE_HIGH_SPEED_H)
+		{
+		    m_AimSignal_H = 6000;
+		}
+		else
+		{
+		    m_AimSignal_H = (angle - ANGLE_ZERO_H) * SCALE_AIM_SIGNAL_H ;
+		}
+	}
+	else
+	{
+		m_bHighSpeed_H = 1;
+		m_AimSignal_H = 6000;
+	}
+	if (m_AimSignal_H > 6000)
+	{
+		m_AimSignal_H = 6000;
+	}
+	// x.上电初始（N个码盘数的周期，最少Nms），如果解算出的瞄准信号不为0(没有收到连续N个0码值)，
+	// 那么直到瞄准信号出现过0之前，瞄准信号一直输出0
+	static unsigned int RCV_CNT = 0;
+	if (1 == m_PowerOnInitState_H)
+	{
+		RCV_CNT++;
+		if (RCV_CNT < 10)	// 计数值累加溢出后从0开始会触发条件重新判断零位.联调时发现问题，扳住操纵台，过一会儿会进入零位错误状态20180424
+		{													
+			if (m_AimSignal_H != 0)							
+			{
+				RCV_CNT = 0;
+				m_AimSignal_H = 0;
+				m_PowerOnInitState_H = 1;
+			}
+			else
+			{
+				m_PowerOnInitState_H = 0;
+				preCode = Code_H * SIGNED;
+			}
+		}
+	}
+	
+	// 4.return aim signal.
+	return (m_AimSignal_H *= SIGNED);
+}
+
+int CztDataBase::Code2AimSignal_V(int Code_V)
+{
+	// 0. move to baseline.
+	Code_V = CodeOnBaseline(Code_V, m_ZeroCode_V);
+	// 防止码盘松动造成码盘值跨界（正负界）。
+	// 设置面板灯故障闪烁模式。
+	static int preCode = 0;
+	if (0 == m_PowerOnInitState_V)
+	{
+		if (abs(Code_V - preCode) < 4096)
+		{
+			preCode = Code_V;
+			m_LampState_V = STATE_LAMP_NORMAL_V;
+		}
+		else
+		{
+			Code_V = preCode;
+			m_LampState_V = STATE_LAMP_ZERO_ERROR_V;
+		}
+	}
+	else
+	{
+		m_LampState_V = STATE_LAMP_ZERO_INIT_V;
+	}
+	// Reverse value,For Aim-Signal and MP-code are opposite to each other.
+	int SIGNED = ((Code_V < 0) ? (1) : (-1));
+	// 1.Absolution.
+	Code_V = abs(Code_V);
+	// 2.Convert code to angle(0~30 degree).
+	float angle = Code2Angle(Code_V);
+	// 3.Interval judgment.
+	if (angle <= ANGLE_MAX_SPEED_V)
+	{
+		m_bHighSpeed_V = 0;
+		if (angle <= ANGLE_ZERO_V)
+		{
+			m_AimSignal_V = 0;
+		}
+		else if ((angle >= ANGLE_HIGH_SPEED_V))
+		{
+			m_AimSignal_V = 6000;
+		}
+		else
+		{
+			m_AimSignal_V = (angle - ANGLE_ZERO_V) * SCALE_AIM_SIGNAL_V;
+		}
+	}
+	else
+	{
+		m_bHighSpeed_V = 1;
+		m_AimSignal_V = 6000;
+	}
+	if (m_AimSignal_V > 6000)
+	{
+		m_AimSignal_V = 6000;
+	}
+	// x.上电初始（10个码盘数的周期，最少10ms），如果瞄准信号不为0，
+	// 直到瞄准信号出现过0之前，瞄准信号一直输出0
+	static unsigned int RCV_CNT = 0;
+	if (1 == m_PowerOnInitState_V)
+	{
+		RCV_CNT++;
+		if (RCV_CNT < 10)
+		{
+			if (m_AimSignal_V != 0)
+			{
+				RCV_CNT = 0;
+				m_AimSignal_V = 0;
+				m_PowerOnInitState_V = 1;
+			}
+			else
+			{
+				m_PowerOnInitState_V = 0;
+				preCode = Code_V * SIGNED;
+			}
+		}
+	}
+	
+	// 4.return aim signal.
+	return (m_AimSignal_V *= SIGNED);
+}
+
+void CztDataBase::MakeFrWord_IO(IoCztBtnSw *pBtnSw)
+{
+	m_Fr_Word_IO.data.SA1 = (pBtnSw->m_Btn_Sw_IO.data.SA1_L ^ 1);
+	m_Fr_Word_IO.data.SA2 = (pBtnSw->m_Btn_Sw_IO.data.SA2_L ^ 1);
+	m_Fr_Word_IO.data.SC4 = (pBtnSw->m_Btn_Sw_IO.data.SC4_L ^ 1);
+	m_Fr_Word_IO.data.SC3 = (pBtnSw->m_Btn_Sw_IO.data.SC3_L1 ^ 1);
+	m_Fr_Word_IO.data.SC2 = (pBtnSw->m_Btn_Sw_IO.data.SC2_L ^ 1);
+	m_Fr_Word_IO.data.SC1 = (pBtnSw->m_Btn_Sw_IO.data.SC1_L ^ 1);
+	m_Fr_Word_IO.data.HSPEED_H = m_bHighSpeed_H;
+	m_Fr_Word_IO.data.HSPEED_V = m_bHighSpeed_V;
+
+	if (0 == pBtnSw->m_Btn_Sw_IO.data.SB6_L1)
+	{
+		CztData_.m_Fr_Word_IO.data.SB6 = 1;
+	}
+	else if (0 == pBtnSw->m_Btn_Sw_IO.data.SB6_L2)
+	{
+		CztData_.m_Fr_Word_IO.data.SB6 = 2;
+	}
+	else
+	{
+		CztData_.m_Fr_Word_IO.data.SB6 = 0;
+	}
+	m_Fr_Word_IO.data.SB5 = (pBtnSw->m_Btn_Sw_IO.data.SB5_L ^ 1);
+	m_Fr_Word_IO.data.SB4 = (pBtnSw->m_Btn_Sw_IO.data.SB4_L ^ 1);
+	if (0 == pBtnSw->m_Btn_Sw_IO.data.SB3_L1)
+	{
+		CztData_.m_Fr_Word_IO.data.SB3 = 1;
+	}
+	else if (0 == pBtnSw->m_Btn_Sw_IO.data.SB3_L2)
+	{
+		m_Fr_Word_IO.data.SB3 = 2;
+	}
+	else
+	{
+		m_Fr_Word_IO.data.SB3 = 0;
+	}
+	m_Fr_Word_IO.data.SB2 = (pBtnSw->m_Btn_Sw_IO.data.SB2_L ^ 1);
+	m_Fr_Word_IO.data.SB1 = (pBtnSw->m_Btn_Sw_IO.data.SB1_L ^ 1);
+
+}

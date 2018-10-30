@@ -1,0 +1,127 @@
+#include "DataInterface.h"
+#include "pt-1.4/PtThreadEx.h"
+#include <math.h>
+PtThreadEx ThreadQ[TASKS_MAX];
+DisplayInfo TubeShow;
+DataInterface::DataInterface()
+{
+}
+
+
+DataInterface::~DataInterface()
+{
+}
+
+CeSu::CeSu()
+	:d(0), L(0), Speed(0)
+{
+
+}
+CeSu::~CeSu()
+{
+
+}
+
+DisplayInfo::DisplayInfo()
+	:CNT(0)
+{
+	//code of number 0~9         
+	const unsigned char  arr[10] = 
+		{ 0x3f,0x06,0x5b,0x4f,0x66,0x6d,0x7d,0x07,0x7f,0x6f };
+	for (int i = 0; i < 10; i++)
+	{
+		Numbers[i] = arr[i];
+	}
+}
+DisplayInfo::~DisplayInfo()
+{
+
+}
+
+void DisplayInfo::MakeInfo(unsigned long MSG)
+{
+	for (int i = 0; i < 10; i++)
+	{
+		InfoTime[i] = 0x00;
+		InfoSpeed[i] = 0x00;
+	}
+	InfoSpeed[0] = 0x38; // L
+	InfoTime[0] = 0x31;// T
+	/**
+	 * Make Time Information.
+	 */
+	CNT = 0;
+	unsigned long showInfo = MSG * 0.01;
+	// 将数据按十进制位拆分，由高至低temp[0]~temp[9]
+	while (showInfo > 0)
+	{
+		InfoTime[9 - CNT] = Numbers[showInfo % 10];
+		CNT++;
+		showInfo *= 0.1;
+	}
+	/**
+	* CNT值必然小于9:uTime最大值为2^32(um)=4294967296(um)=4294.967296(s)=71.582(min)
+	* 所以设备在上电连续工作1小时且中间没有复位过的情况下，应断电重置或复位重置。
+	* uTime*0.01后最大值为8位
+	*
+	* i=5,个位补0;
+	* i=4,0.1位补0;
+	* i=3,0.01位补0;
+	* i=2,0.001位补0
+	*/
+	for (int i = CNT; i < 5; i++)
+	{
+		if (i != 1)
+		{
+			InfoTime[9 - i] = Numbers[0];
+		}
+
+	}
+	InfoTime[5] += 0x80;	// 在第6位后加小数点,显示精度为0.1ms
+
+	/**
+	 * Make Speed Information
+	 */
+	CNT = 0;
+	showInfo = MakeSpeed.Caculate(MSG*0.000001) * 10000;
+	while (showInfo > 0)
+	{
+		InfoSpeed[9 - CNT] = Numbers[showInfo % 10];
+		CNT++;
+		showInfo *= 0.1;
+	}
+	for (int i = CNT; i < 5; i++)
+	{
+		if (i != 1)
+		{
+			InfoSpeed[9 - i] = Numbers[0];
+		}
+	}
+	InfoSpeed[5] += 0x80;
+}
+
+void DisplayInfo::SetDistance(double dd, double dL)
+{
+	MakeSpeed.d = dd;
+	MakeSpeed.L = dL;
+}
+// return (%s)
+double CeSu::Caculate(double t)
+{
+// 	return Speed = (2 * (atan(d / (2 * L)) * 180 / PI) / t);
+	return Speed = 2 * atan2(d * 0.5, L) * 180 * 0.31830988618379067153776752674503 / t;
+}
+void CeSu::SetDistance(double dd, double dr)
+{
+	d = dd;
+	L = dr;
+}
+static unsigned int g_CurTaskIndex = 0;
+void ThreadSchedule()
+{
+	
+	for (g_CurTaskIndex = 0; ThreadQ[g_CurTaskIndex].ID != THREAD_NULL; g_CurTaskIndex++)
+	{
+		ThreadQ[g_CurTaskIndex].Schedule();
+	}
+}

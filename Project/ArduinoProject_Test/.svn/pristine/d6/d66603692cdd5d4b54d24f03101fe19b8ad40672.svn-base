@@ -1,0 +1,12 @@
+#include "DataInterface.h"
+
+
+
+DataInterface::DataInterface()
+{
+}
+
+
+DataInterface::~DataInterface()
+{
+}

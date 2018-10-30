@@ -1,0 +1,377 @@
+#include <tm1638.h>
+#include"DataInterface.h"
+
+// #include <IRremote.h>
+// defines for setting and clearing register bits
+#ifndef cbi
+#define cbi(sfr, bit) (_SFR_BYTE(sfr) &= ~_BV(bit))	
+#endif
+#ifndef sbi
+#define sbi(sfr, bit) (_SFR_BYTE(sfr) |= _BV(bit))	
+#endif
+
+bool initState = true;	// 上电或复位，进行初始化工作
+unsigned int initCnt = 0;//初始化时进行10次采样，计算平均值作为基准值
+
+unsigned long uTime = 0;	// 扫过两列传感器的时间间隔
+
+int BaseValue_A = 0;		// the base line of the sensor value
+int BaseValue_B = 0;
+
+const int ledPin_A[2] = { 9, 8 };
+const int ledPin_B[2] = { 7, 6 };
+
+const int adPin_A = A1;
+const int adPin_B = A0;
+
+bool ledState[2] = { false, false };		// A/B通道LED状态，初始状态为红色
+
+const int THRESHOLD = 100;	// IF (curValue - BaseValue > Threshold): trige time-meter
+
+int tmStartFlag = 0;	// time-meter stop/run flag.
+						// 0--stop;1--A started wait for B stop;2--B started wait for A stop
+const int TIME_INTERVAL = 1000;	// 两次计时间隔
+
+unsigned long curTimeCnt = 0;
+unsigned long preTimeCnt = 0;
+
+/**************************
+** tm1638 tube
+**************************/
+//each segment of a tube
+const unsigned char  Seg_test[8] = { 0x20,0x01,0x02,0x04,0x08,0x10,0x40,0x80 };
+//code of number 0~9         
+const unsigned char  Number_arr[10] = { 0x3f,0x06,0x5b,0x4f,0x66,0x6d,0x7d,0x07,0x7f,0x6f };
+//temp arrary for tube to show
+unsigned char initShow_Welcome[10] = { 0x76,0x79,0x38,0x38,0xbf,0x88,0x5b,0x3f,0x86,0x88 };	 // HELLO._.201._.
+unsigned char timeToShow[10] = { 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 };
+unsigned int CNT = 0;
+//from 0x00~0x07
+unsigned char lightLevel = 0x01;
+
+const int pin_STB = 12;
+const int pin_CLK = 11;
+const int pin_DIO = 10;
+
+// 数显管
+TM1638 tm1638(pin_STB, pin_CLK, pin_DIO, lightLevel);
+// 蜂鸣器
+const int pin_BUZZER = 13;
+// 遥控器
+// int RECV_PIN = 2;
+// IRrecv irrecv(RECV_PIN);
+// decode_results results;
+
+void setup() {				
+	// DEFAULT: the default analog reference of 5 volts(on 5V Arduino boards) or 3.3 volts(on 3.3V Arduino boards)
+	// INTERNAL : an built - in reference, equal to 1.1 volts on the ATmega168 or ATmega328 and 2.56 volts on the ATmega8(not available on the Arduino Mega)
+	// EXTERNAL : the voltage applied to the AREF pin(0 to 5V only) is used as the reference.
+	analogReference(INTERNAL);
+	// 指示灯
+	for (int i = 0; i < 2; i++)
+	{
+		pinMode(ledPin_A[i], OUTPUT);
+		pinMode(ledPin_B[i], OUTPUT);
+	}
+	// 蜂鸣器
+	pinMode(pin_BUZZER, OUTPUT);
+	// 红外遥控器
+// 	irrecv.enableIRIn(); // Start the receiver
+	/************************************************************************/
+	/* AD采样Prescaler越小精度越差，默认为128
+	** 所以假設 Arduino 的時脈(Clock)是 16MHz,
+	**	則 ADC clock = 16MHz / 128 = 125KHz;
+	**	一次 ADC 轉換要踢它13下, 就是要 13 clock (tick),
+	**	於是變成 125KHz/13 = 9615Hz
+	** 默认为9615Hz~10kHz
+	** Prescaler=8理论频率为153.846kHz;=16理论值为77kHz;=4---307.69kHz;
+	** 本程序为两通道采样,采样频率还要除2                                                                    */
+	/************************************************************************/
+	setPrescale(4);		// 设定预分频因子：128--111；64--110；32--101；16--100；8--011；4--010；
+						// start serial port at 9600 bps:
+	Serial.begin(115200);
+	while (!Serial)
+	{
+		; // wait for serial port to connect. Needed for native USB port only
+	}
+	ConfigCpuTimer2(1000);
+	StartCpuTimer2();
+}
+
+void loop() {
+	// 使用SWITCH语句尽量降低AD采集占用的时钟周期
+	switch (tmStartFlag)
+	{
+	case 0:	// 计时没有开始
+		if (!initState)	// 初始化完毕，监测A/B通道值
+		{
+			// 读取传感器的值
+			// 如果检测到一个通道有上升沿(大于某一阈值)，则打开计时器或停止计时器
+			// 检测到一个通道触发计时(返回值非0)，立即进入下轮查询
+			unsigned int ad_A = analogRead(adPin_A);
+			if (OperateTimeMeter(1, ad_A - BaseValue_A) == 0) // A通道上升沿检测
+			{			
+				unsigned int ad_B = analogRead(adPin_B);
+				OperateTimeMeter(2, ad_B - BaseValue_B);// B通道上升沿检测
+			}
+			//////////////////////////////////////////////////////////////////////////
+			// 串口发送信息	
+// 			Serial.println("BaseB=");
+// 			Serial.println(BaseValue_B);
+// 			Serial.print("SampleB=");
+// 			Serial.println(analogRead(adPin_B));
+			//////////////////////////////////////////////////////////////////////////
+		}
+		// 如果需要重置，则进入初始化。采集10次取均值作为基准值。
+		else
+		{
+			initCnt++;
+			digitalWrite(pin_BUZZER, HIGH);
+			// 发现NANO板上电第一次AD采集的值不准，所以adValuesA[0]、adValuesB[0]被舍弃。
+			static unsigned int adValuesA[11], adValuesB[11];
+			if (initCnt < 12)	// 累加传感器的值
+			{
+				adValuesA[initCnt - 1] = analogRead(adPin_A);
+				adValuesB[initCnt - 1] = analogRead(adPin_B);
+
+				// show welcome!!!
+				if (initCnt < 9)
+				{
+					for (int j = 0; j < 10; j++)
+					{
+						tm1638.DisplayOneDigi_TM1638(j + 1, Seg_test[initCnt - 1]);
+					}
+					delay(100);
+				}
+			}
+			else
+			{
+				initState = false;
+				BaseValue_A = BaseValue_B = 0;
+				// 读取传感器的值作为基准值，之后读取的传感器值与该值作差值，判断结果是否大于某一阈值
+				for (int i = 0; i < 10; i++)
+				{
+					Serial.println("*****");
+					Serial.println(adValuesB[i+1]);
+					Serial.println("*****");
+					BaseValue_A += adValuesA[i+1];
+					BaseValue_B += adValuesB[i+1];
+				}
+
+				BaseValue_A *= 0.1;	// 10次平均
+				BaseValue_B *= 0.1;
+
+				curTimeCnt = preTimeCnt = micros();
+				Serial.println("start");
+				Serial.println(BaseValue_A);
+				Serial.println(BaseValue_B);
+				tm1638.DisplayArr_TM1638(1, &initShow_Welcome[0], 10);
+				digitalWrite(pin_BUZZER, LOW);
+			}
+			//初始化时指示灯为未触发状态:red
+			setLedState(1, ledState[0]);
+			setLedState(2, ledState[1]);
+		}
+		break;
+	case 1:	// A触发计时开始,监测B通道上升沿
+		OperateTimeMeter(2, analogRead(adPin_B) - BaseValue_B);
+		break;
+	case 2:	// B触发计时开始,监测A通道上升沿
+		OperateTimeMeter(1, analogRead(adPin_A) - BaseValue_A);
+		break;
+	default:
+		break;
+	}
+
+}
+/*************************
+**	根据value的值设置与index对应的计时器操作
+**	index=1 or 2
+**************************/
+int OperateTimeMeter(int index, int value)
+{
+
+	if (value > THRESHOLD)
+	{
+		//////////////////////////////////////////////////////////////////////////
+		Serial.print(index);
+		Serial.print("=");
+		Serial.println(value);
+		//////////////////////////////////////////////////////////////////////////
+		// time-meter not start open it and set start_flag=index
+		if (0 == tmStartFlag)
+		{
+			// start the time-meter by triger-index(start_flag=index)
+			preTimeCnt = curTimeCnt = micros();
+			tmStartFlag = index;
+			uTime = 0;
+			// revers led state
+			reverseLedState(index);
+			// start buzzer
+			digitalWrite(pin_BUZZER, HIGH);
+			return index;
+		}
+		// when time-meter have started by triger-index(start_flag=index) stop it.
+		else if (tmStartFlag == ((~index) & 3))
+		{
+			// stop the time-meter
+			tmStartFlag = 0;
+			// calculate elapse time 
+			curTimeCnt = micros();
+			uTime = curTimeCnt - preTimeCnt; // us
+			// reset counter
+			preTimeCnt = curTimeCnt;
+			// do sth.	
+			// stop buzzer
+			digitalWrite(pin_BUZZER, LOW);
+			// reverse this channel led state
+			reverseLedState(index);
+			/*******************
+			** OUTPUT
+			********************/
+			//---------------------------------------------
+			// serial port output
+			Serial.println(uTime*0.000001, 6);
+			//---------------------------------------------
+			// 8-tube output
+			uTime *= 0.01;	// 精度控制在0.1ms级
+			CNT = 0;
+			// 将数据按十进制位拆分，由高至低temp[0]~temp[9]
+			while (uTime >= 10)
+			{
+				timeToShow[9 - CNT] = Number_arr[uTime % 10];
+				CNT++;
+				uTime *= 0.1;
+			}
+			// CNT值必然小于9:uTime最大值为2^32(um)=4294967296(um)=4294.967296(s)=71.582(min)
+			// 所以设备在上电连续工作1小时且中间没有复位过的情况下，应断电重置或复位重置。
+			// uTime*0.01后最大值为8位
+			timeToShow[9 - CNT] = Number_arr[uTime];	// 最高位
+			// 个位补0
+			if (CNT < 4)
+			{
+				timeToShow[9 - 4] = Number_arr[0];
+			}
+			// 0.1位补0
+			if (CNT < 3)
+			{
+				timeToShow[9 - 3] = Number_arr[0];
+			}
+			// 0.01位补0
+			if (CNT < 2)
+			{
+				timeToShow[9 - 2] = Number_arr[0];
+			}
+			// 0.001位补0
+			if (CNT < 1)
+			{
+				timeToShow[9 - 1] = Number_arr[0];
+			}
+			timeToShow[5] += 0x80;	// 在第6位后加小数点
+									// 数显控制
+			tm1638.DisplayArr_TM1638(1, timeToShow, 10);
+			//---------------------------------------------
+			// 重置数据
+			for (int i = 0; i < 8; i++)
+			{
+				timeToShow[i] = 0x00;
+			}
+			// 停表后保持一段时间，防止刚刚停止又马上打开
+			delay(TIME_INTERVAL);
+			// 重置指示灯状态为未触发
+			ledState[0] = ledState[1] = false;
+			setLedState(1, ledState[0]);
+			setLedState(2, ledState[1]);
+			return index;
+		}
+
+	}
+	return 0;
+}
+/*************************
+** 设置指示灯状态
+** index = 1,2;state = false,true -- red,green
+************************/
+void setLedState(int index, bool state)
+{
+	switch (index)
+	{
+	case 1:		// 通道A
+		if (!state)
+		{
+			digitalWrite(ledPin_A[1], LOW);
+			digitalWrite(ledPin_A[0], HIGH);
+		}
+		else
+		{
+			digitalWrite(ledPin_A[0], LOW);
+			digitalWrite(ledPin_A[1], HIGH);
+		}
+		break;
+	case 2:		// 通道B
+		if (!state)
+		{
+			digitalWrite(ledPin_B[1], LOW);
+			digitalWrite(ledPin_B[0], HIGH);
+		}
+		else
+		{
+			digitalWrite(ledPin_B[0], LOW);
+			digitalWrite(ledPin_B[1], HIGH);
+		}
+		break;
+	default:
+		break;
+	}
+}
+/*************************
+** 翻转指示灯状态 index=1,2
+************************/
+void reverseLedState(int index)
+{
+	ledState[index - 1] = !ledState[index - 1];
+	setLedState(index, ledState[index - 1]);
+}
+/*************************
+** 设定AD采样周期预设值，默认为128
+************************/
+void setPrescale(unsigned int value)
+{
+	int pw_2 = fastLog2(value);
+	if ((pw_2 >> 2) & 0x01)
+	{
+		sbi(ADCSRA, ADPS2);
+	}
+	else
+	{
+		cbi(ADCSRA, ADPS2);
+	}
+	if ((pw_2 >> 1) & 0x01)
+	{
+		sbi(ADCSRA, ADPS1);
+	}
+	else
+	{
+		cbi(ADCSRA, ADPS1);
+	}
+	if ((pw_2 >> 0) & 0x01)
+	{
+		sbi(ADCSRA, ADPS0);
+	}
+	else
+	{
+		cbi(ADCSRA, ADPS0);
+	}
+}
+/***********************
+** 获取log2(x)算法
+***********************/
+int fastLog2(int x)
+{
+	float fx;
+	unsigned long ix, exp;
+	fx = (float)x;
+	ix = *(unsigned long*)& fx;
+	exp = (ix >> 23) & 0xFF;
+	return exp - 127;
+}

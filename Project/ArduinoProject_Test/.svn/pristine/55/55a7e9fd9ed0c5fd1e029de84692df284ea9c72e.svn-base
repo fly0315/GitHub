@@ -1,0 +1,16 @@
+#include "Timer.h"
+#include <Arduino.h>
+
+
+Timer::Timer()
+{
+}
+
+Timer::~Timer()
+{
+}
+
+void OnTimer2()
+{
+
+}

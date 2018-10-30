@@ -1,0 +1,18 @@
+#pragma once
+#include <FlexiTimer2.h>
+
+void OnTimer2();
+
+inline void StartCpuTimer2()
+{
+	FlexiTimer2::start();
+}
+inline void StopCpuTimer2()
+{
+	FlexiTimer2::stop();
+}
+
+inline void ConfigCpuTimer2(unsigned long MS)
+{
+	FlexiTimer2::set(MS, 0.001, OnTimer2);
+}

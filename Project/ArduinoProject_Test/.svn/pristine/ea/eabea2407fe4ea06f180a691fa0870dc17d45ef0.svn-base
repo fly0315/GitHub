@@ -1,0 +1,76 @@
+#pragma once
+#ifndef DATAINTERFACE_H
+#define  DATAINTERFACE_H
+
+typedef enum _TASK_INDEX
+{
+	// add your task here
+	TKIN_TMMT = 0,
+	TKIN_DISPLAY,
+	TKIN_SPEAKER,
+	
+	//////////////////////////////////////////////////////////////////////////
+	TASKS_MAX                       // total task number = 6
+} TASK_INDEX;
+#define SCHED_MAX (TASKS_MAX)
+
+enum TimeMeterST
+{
+	STOP = 0,
+	START_A,
+	START_B,
+	INIT,
+	CONFIG,
+
+};
+enum DisplayType
+{
+	TIMEMETER = 0,
+	SPEED
+};
+
+class CeSu
+{
+public:
+	CeSu();
+	~CeSu();
+public:
+	double d;
+	double L;
+	double Speed;
+	void SetDistance(double dd, double dr);
+	double Caculate(double t);
+private:
+
+
+};
+
+class DisplayInfo
+{
+public:
+	DisplayInfo();
+	~DisplayInfo();
+public:
+	CeSu MakeSpeed;
+	unsigned int CNT;	
+	unsigned char InfoTime[10];
+	unsigned char InfoSpeed[10];
+private:
+	//code of number 0~9         
+	unsigned char Numbers[10];
+
+public:
+	void MakeInfo(unsigned long MSG);
+	void SetDistance(double dd, double dL);
+};
+
+class DataInterface
+{
+public:
+	DataInterface();
+	~DataInterface();
+};
+
+void ThreadSchedule();
+
+#endif
