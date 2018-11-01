@@ -106,6 +106,7 @@ protected:
 	inline unsigned int t2b(unsigned int index_t) { return (index_t * m_nFac_t2b); }
 public:
 	int Initialize();
+	inline const void* GetBuffer() { return (void*)m_pBuffer_b; }
 	void SetSize(unsigned int nSize_t, unsigned int nSizeOfElemType);
 	inline ST_T GetState() { return m_State; }
 
