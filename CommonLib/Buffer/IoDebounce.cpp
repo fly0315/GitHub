@@ -1,23 +1,21 @@
 #include "IODebounce.h"
-IoDebounce::IoDebounce(IOBITS_64 InitIOs,
+IoDebounce::IoDebounce(IOBITS_u64 InitIOs,
 				unsigned int Depth, 
 				float Prevail,
-				IOBITS_64 MASK)
+				IOBITS_u64 MASK)
 	: m_InitValue(InitIOs)
 	, m_OutPutValue(InitIOs)
 	, m_nDepth(Depth)
 	, m_Mask(MASK)
-	, m_LVL_H((unsigned int)(Prevail * 100.0f * Depth))
-	, m_LVL_L((unsigned int)((float)Depth * 100.0f - m_LVL_H))
-	, m_Buffer(m_nDepth, sizeof(IOBITS_64))
-	, m_TableOfChangeBit(sizeof(IOBITS_64) * 8,sizeof(unsigned int))
+	, m_Threshold((unsigned int)(Prevail * Depth))
+	, m_ChangedBitBuffer(m_nDepth, sizeof(IOBITS_u64))
 {
 	assert(m_nDepth != 0);
-	m_Buffer.Initialize(); 
-	m_TableOfChangeBit.Initialize();
-	while (m_Buffer.GetState() != FULL)
+	m_ChangedBitBuffer.Initialize(); 
+	IOBITS_u64 cb = 0;
+	while (m_ChangedBitBuffer.GetState() != FULL)
 	{
-		m_Buffer.Add(&InitIOs, 1);
+		m_ChangedBitBuffer.Add(&cb, 1);
 	}
 }
 IoDebounce::~IoDebounce()
@@ -25,58 +23,37 @@ IoDebounce::~IoDebounce()
 
 }
 
-IOBITS_64 IoDebounce::Sampling(IOBITS_64 IOs)
+IOBITS_u64 IoDebounce::Sampling(IOBITS_u64 IOs)
 {
-	// 1.add sample IO data in buffer.
-	m_Buffer.Add(&IOs, 1);
-	// 2.make a changed bits table
-	// 3.change output data with changed bit table
-	unsigned int TblElem;
-	for (unsigned int i = MakeTable(IOs); i ; i--)
-	{
-		m_TableOfChangeBit.ReadFrontAt(i - 1, &TblElem);
-		if ((GetSum(TblElem) * 100) >= m_LVL_H)
-		{
-			SetBit(m_OutPutValue, GetIndex(TblElem));
-		}
-		else if ((GetSum(TblElem) * 100) <= m_LVL_L)
-		{
-			// +0.001f for accuracy loss compensation
-			ClrBit(m_OutPutValue, GetIndex(TblElem));
-		}
-	}
-	// 4.modify the mask bit
-	m_OutPutValue = (m_OutPutValue & (~m_Mask)) + (IOs & m_Mask);
-	return m_OutPutValue;
-}
-
-unsigned int IoDebounce::MakeTable(IOBITS_64 IOs)
-{
-	IOBITS_64 ChangeBits = (IOs ^ m_OutPutValue) & (~m_Mask);
-	m_TableOfChangeBit.Clean();
-/**	// search from LSB.
- *	// loop number depending on the highest 1-bit index.
- *  // abandoned for Inefficient. LiuBin.20181020
- *	for (unsigned int i = 0; data; i++, data >>= 1)
- *	{
- *		if (data & 1)
- *		{
- *			m_TableOfChangeBit.Add(&i, 1);
- *		}
- *	}
- */
-	// loops depending on how many 1-bit in data.
-	unsigned int offsetLen = 0;
-	IOBITS_64 IoData, temp;
-	unsigned int n, TblElem, nDepth;
+	static IOBITS_u64 cbi;
+	static IOBITS_u64 ChangeBits;
+	static IOBITS_u64 CB, temp, LB;
+	static unsigned int nDepth, bi, sum;
+	cbi = 0;
+	// 0. find changed bits
+	ChangeBits = (IOs ^ m_OutPutValue) & (~m_Mask);
+	// 1 add into buffer for keep change status 
+	m_ChangedBitBuffer.Add(&ChangeBits, 1);
+	// 2.loops depending on how many changed bits in data.
+	/**	// search from LSB.
+	*	// loop number depending on the highest 1-bit index.
+	*  // abandoned for Inefficient. LiuBin.20181020
+	*	for (unsigned int i = 0; data; i++, data >>= 1)
+	*	{
+	*		if (data & 1)
+	*		{
+	*			m_TableOfChangeBit.Add(&i, 1);
+	*		}
+	*	}
+	*/
 	// the number of changed IO bits always not large 
 	// so make it outer loop and make sample depth inner loop .
+	// 	unsigned int n, offsetLen = 0;
 	while (ChangeBits)
 	{
-
-		// 1.find the highest 1-bit.
+		/*1.find the highest 1-bit.*/
 		/**
-		 * abandoned for Inefficient. liubin.20181027
+		* abandoned for Inefficient. liubin.20181027
 		// bi-search, starting from MSB (also can starting from LSB).
 		temp = ChangeBits;
 		n = 1;
@@ -90,18 +67,35 @@ unsigned int IoDebounce::MakeTable(IOBITS_64 IOs)
 		offsetLen += (n + 1);				// recode offset.
 		ChangeBits <<= (n + 1);
 		*/
-		// fast-log2(x)-search,starting from LSB.LiuBin.20181027
-		temp = ChangeBits & (ChangeBits - 1);		// remaining is lowest 1-bit from right
-		TblElem = fastlog2_64b(ChangeBits - temp);	// lowest 1-bit index
-		ChangeBits = temp;							// loop and find rest
-		// 2.calculate sum with bit index
-		for (nDepth = m_nDepth - 1; nDepth ; nDepth--)
+		temp = ChangeBits & (ChangeBits - 1);		// remove lowest 1-bit
+		LB = ChangeBits - temp;						// find lowest 1-bit
+		// fast-log2(x)-search,starting from LSB.LiuBin.20181027.
+		// fastlog2 is not necessary.20181102
+// 		bi = fastlog2_64b(LB);		// lowest 1-bit index
+		ChangeBits = temp;							// for rest loops if any
+		/* 2.calculate sum with bit index */
+		for (nDepth = m_nDepth, sum = 0; nDepth; nDepth--)
 		{
-			m_Buffer.ReadBackAt(nDepth, &IoData);
-			MakeElement_Sum(TblElem, IoData);
+			m_ChangedBitBuffer.ReadBackAt(nDepth - 1, &CB);
+			sum += ((CB & LB) != 0);
 		}
-		// 3.and add into table
-		m_TableOfChangeBit.Add(&TblElem, 1);
+		// 3.and make changed bit index
+		if (sum >= m_Threshold)
+		{
+			cbi += LB;
+		}
 	}
-	return m_TableOfChangeBit.GetUsedSize();
+	if (cbi != 0)
+	{
+		m_OutPutValue ^= cbi;
+		for (nDepth = m_nDepth; nDepth; nDepth--)
+		{
+			m_ChangedBitBuffer.ReadBackAt(nDepth - 1, &CB);
+			CB ^= cbi;
+			m_ChangedBitBuffer.ModifyBackAt(nDepth - 1, &CB);
+		}
+	}
+	m_OutPutValue = (m_OutPutValue & (~m_Mask)) + (IOs & m_Mask);
+	return m_OutPutValue;
 }
+

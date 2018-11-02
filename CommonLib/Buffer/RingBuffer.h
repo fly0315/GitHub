@@ -170,7 +170,7 @@ public:
 	}
 	inline void ModifyBackAt(unsigned int nIndex_t, void *src)
 	{
-		memcpy(m_pBuffer_b + t2b((m_nIn_t - m_nHead_t) - ((nIndex_t + 1))), src, m_nFac_t2b);
+		memcpy(m_pBuffer_b + t2b(mod(m_nIn_t - (nIndex_t + 1))), src, m_nFac_t2b);
 	}
 	
 	inline unsigned int CutFront(unsigned int nLen_t)

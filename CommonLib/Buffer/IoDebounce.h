@@ -9,13 +9,14 @@
 #pragma once
 #include "RingBuffer.h"
 
-#define IOBITS_64 unsigned long long
+#define IOBITS_u64 unsigned long long
 
-inline unsigned long long GetBit(IOBITS_64 data, unsigned int i) { return ((data >> i) & 1u); }
-inline void SetBit(IOBITS_64 &data, unsigned int i) { (data |= ((IOBITS_64)1 << i)); }
-inline void ClrBit(IOBITS_64 &data, unsigned int i) { (data &= ~((IOBITS_64)1 << i)); }
+inline unsigned long long GetBit(IOBITS_u64 data, unsigned int i) { return ((data >> i) & 1u); }
+inline void SetBit(IOBITS_u64 &data, unsigned int i) { (data |= ((IOBITS_u64)1 << i)); }
+inline void ClrBit(IOBITS_u64 &data, unsigned int i) { (data &= ~((IOBITS_u64)1 << i)); }
+inline void ToggleBit(IOBITS_u64 &data, unsigned int i) { ; }
 
-inline unsigned int CountBit1(IOBITS_64 n)
+inline unsigned int CountBit1(IOBITS_u64 n)
 {
 	unsigned int cnt = 0;
 	while (n)
@@ -52,7 +53,7 @@ inline unsigned int FastCountBit1(unsigned int data)
  *	 return 31-n;
  * }
  */
-inline int f1b(IOBITS_64 Data, unsigned int nByteCnt)
+inline int f1b(IOBITS_u64 Data, unsigned int nByteCnt)
 {
 	if (0 == Data) { return -1; }
 	unsigned int n = 1;
@@ -69,7 +70,7 @@ inline int f1b(IOBITS_64 Data, unsigned int nByteCnt)
 	return temp - n;
 }
 
-inline int f1b64(IOBITS_64 Data)
+inline int f1b64(IOBITS_u64 Data)
 {
 	if (0 == Data) { return -1; }
 	unsigned int n = 1;
@@ -90,30 +91,29 @@ public:
 	 * MASK = 0 means all IO bits should be eliminated jitters
 	 * Prevail = 0.75 means 75% prevail.
 	 */
-	IoDebounce(IOBITS_64 InitIOs,
+	IoDebounce(IOBITS_u64 InitIOs,
 				unsigned int Depth, 
 				float Prevail,
-				IOBITS_64 MASK = 0
+				IOBITS_u64 MASK = 0
 				 );
 	~IoDebounce();
-	IOBITS_64 Sampling(IOBITS_64 IOs);
-	inline IOBITS_64 GetOutput(){ return m_OutPutValue; }
+	IOBITS_u64 Sampling(IOBITS_u64 IOs);
+	inline IOBITS_u64 GetOutput(){ return m_OutPutValue; }
 private:
-	IOBITS_64 m_Mask;
-	IOBITS_64 m_InitValue;
-	IOBITS_64 m_OutPutValue;
+	IOBITS_u64 m_Mask;
+	IOBITS_u64 m_InitValue;
+	IOBITS_u64 m_OutPutValue;
 	unsigned int m_nDepth; 
-	unsigned int m_LVL_H;
-	unsigned int m_LVL_L;
-	RingBuffer m_Buffer;
+	unsigned int m_Threshold;
+	
+	RingBuffer m_ChangedBitBuffer;
 	/**
 	 * Table element structure: 
 	 *		lowest 8-bits for changed bit index 
 	 *		and the rest for prevail-sum-value.
 	 * max-element number is 64
 	 */
-	RingBuffer m_TableOfChangeBit; 
-	unsigned int MakeTable(IOBITS_64 data);
+	
 	inline unsigned int SetIndex(unsigned int val, unsigned char index)
 	{
 		return (val & (~0xFF)) & (index & 0xFF);
@@ -122,9 +122,9 @@ private:
 	{
 		return (val & 0xFF);
 	}
-	inline void MakeElement_Sum(unsigned int& elem, IOBITS_64 IO)
+	inline void MakeSum(unsigned int& elem, IOBITS_u64 IO, unsigned int index)
 	{
-		elem += ((unsigned int)GetBit(IO, GetIndex(elem)) << 8);
+		elem += (IO & ((IOBITS_u64)1 << index)) ? 1 : 0;
 	}
 	inline unsigned int GetSum(unsigned int val)
 	{
