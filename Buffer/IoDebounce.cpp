@@ -23,7 +23,7 @@ IoDebounce::~IoDebounce()
 
 }
 
-IOBITS_u64 IoDebounce::Sampling(IOBITS_u64 IOs)
+IOBITS_u64 IoDebounce::JitterControl(IOBITS_u64 IOs)
 {
 	static IOBITS_u64 ChangeBits;
 	static IOBITS_u64 CB, temp, LHB;

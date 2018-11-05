@@ -10,11 +10,12 @@
 #include "RingBuffer.h"
 
 #define IOBITS_u64 unsigned long long
-
-inline unsigned long long GetBit(IOBITS_u64 data, unsigned int i) { return ((data >> i) & 1u); }
+/**
+inline unsigned int GetBit(IOBITS_u64 data, unsigned int i) { return ((data >> i) & 1u); }
 inline void SetBit(IOBITS_u64 &data, unsigned int i) { (data |= ((IOBITS_u64)1 << i)); }
 inline void ClrBit(IOBITS_u64 &data, unsigned int i) { (data &= ~((IOBITS_u64)1 << i)); }
-inline void ToggleBit(IOBITS_u64 &data, unsigned int i) { ; }
+inline void ToggleBit(IOBITS_u64 &data, unsigned int i) { data ^= ~((IOBITS_u64)1 << i); }
+
 
 inline unsigned int CountBit1(IOBITS_u64 n)
 {
@@ -37,6 +38,7 @@ inline unsigned int FastCountBit1(unsigned int data)
 	return temp;
 
 }
+*/
 /**
  * find first 1-bit on left.
  * nBitCnt = sizeof(unsigned int) * 8
@@ -53,6 +55,7 @@ inline unsigned int FastCountBit1(unsigned int data)
  *	 return 31-n;
  * }
  */
+/**
 inline int f1b(IOBITS_u64 Data, unsigned int nByteCnt)
 {
 	if (0 == Data) { return -1; }
@@ -82,14 +85,13 @@ inline int f1b64(IOBITS_u64 Data)
 	n -= (Data >> 63);
 	return 63 - n;
 }
-
+*/
 class IoDebounce
 {
 public:
 	/**
-	 * 1-Bits in MASK means these bits shouldn't be eliminated Jitters
+	 * 1-Bits in MASK means these bits shouldn't be eliminated jitters
 	 * MASK = 0 means all IO bits should be eliminated jitters
-	 * Prevail = 0.75 means 75% prevail.
 	 */
 	IoDebounce(IOBITS_u64 InitIOs,
 				unsigned int Depth, 
@@ -98,7 +100,7 @@ public:
 				 );
 	~IoDebounce();
 
-	IOBITS_u64 Sampling(IOBITS_u64 IOs);
+	IOBITS_u64 JitterControl(IOBITS_u64 IOs);
 	inline IOBITS_u64 GetOutput(){ return m_OutPutValue; }
 	void SetFilters(unsigned int* depthArray, unsigned int* thresholdArray);
 private:
@@ -118,13 +120,16 @@ private:
 	};
 	IO_CNTS m_Filters;
 	RingBuffer m_ChangedBitBuffer;
-	/**
+	/** 
 	 * Table element structure: 
 	 *		lowest 8-bits for changed bit index 
 	 *		and the rest for prevail-sum-value.
 	 * max-element number is 64
+	 * 
+	 * Discarded. LiuBin 20081103
 	 */
-	
+	/**	
+	 * no use code.
 	inline unsigned int SetIndex(unsigned int val, unsigned char index)
 	{
 		return (val & (~0xFF)) & (index & 0xFF);
@@ -141,5 +146,6 @@ private:
 	{
 		return (val >> 8);
 	}
+	*/
 };
 #endif
