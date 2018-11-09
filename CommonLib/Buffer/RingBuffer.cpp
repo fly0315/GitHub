@@ -34,12 +34,7 @@ RingBuffer::RingBuffer(unsigned int nSize, unsigned int nSizeOfElemType)
 
 RingBuffer::~RingBuffer(void)
 {
-    if(NULL != m_pBuffer_b)
-    {
-        delete[] m_pBuffer_b;
-        m_pBuffer_b = NULL;
-		m_State = INVALID;
-    }
+	Release();
 }
 
 void RingBuffer::SetSize(unsigned int nSize_t, unsigned int nSizeOfElemType)
@@ -57,11 +52,7 @@ void RingBuffer::SetSize(unsigned int nSize_t, unsigned int nSizeOfElemType)
 
 int RingBuffer::Initialize()
 {
-    if(NULL != m_pBuffer_b)
-    {
-        delete[] m_pBuffer_b;
-        m_pBuffer_b = NULL;
-    }
+	Release();
 
     m_pBuffer_b = new unsigned char[m_nSize_t * m_nFac_t2b];
 
@@ -75,6 +66,16 @@ int RingBuffer::Initialize()
 	m_State = EMPTY;
 
     return 1;
+}
+
+void RingBuffer::Release()
+{
+	if (NULL != m_pBuffer_b)
+	{
+		delete[] m_pBuffer_b;
+		m_pBuffer_b = NULL;
+		m_State = INVALID;
+	}
 }
 
 unsigned int RingBuffer::ChangeState(ChangeType_T type)

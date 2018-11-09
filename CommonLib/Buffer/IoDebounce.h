@@ -9,12 +9,14 @@
 #pragma once
 #include "RingBuffer.h"
 
-#define IOBITS_u64 unsigned long long
-
-inline unsigned long long GetBit(IOBITS_u64 data, unsigned int i) { return ((data >> i) & 1u); }
+#define IOBITS_64b uint64_t
+#define BITNUMBER 64
+/**
+inline unsigned int GetBit(IOBITS_u64 data, unsigned int i) { return ((data >> i) & 1u); }
 inline void SetBit(IOBITS_u64 &data, unsigned int i) { (data |= ((IOBITS_u64)1 << i)); }
 inline void ClrBit(IOBITS_u64 &data, unsigned int i) { (data &= ~((IOBITS_u64)1 << i)); }
-inline void ToggleBit(IOBITS_u64 &data, unsigned int i) { ; }
+inline void ToggleBit(IOBITS_u64 &data, unsigned int i) { data ^= ~((IOBITS_u64)1 << i); }
+
 
 inline unsigned int CountBit1(IOBITS_u64 n)
 {
@@ -37,6 +39,7 @@ inline unsigned int FastCountBit1(unsigned int data)
 	return temp;
 
 }
+*/
 /**
  * find first 1-bit on left.
  * nBitCnt = sizeof(unsigned int) * 8
@@ -53,6 +56,7 @@ inline unsigned int FastCountBit1(unsigned int data)
  *	 return 31-n;
  * }
  */
+/**
 inline int f1b(IOBITS_u64 Data, unsigned int nByteCnt)
 {
 	if (0 == Data) { return -1; }
@@ -82,38 +86,46 @@ inline int f1b64(IOBITS_u64 Data)
 	n -= (Data >> 63);
 	return 63 - n;
 }
-
+*/
 class IoDebounce
 {
 public:
 	/**
-	 * 1-Bits in MASK means these bits shouldn't be eliminated Jitters
+	 * 1-Bits in MASK means these bits shouldn't be eliminated jitters
 	 * MASK = 0 means all IO bits should be eliminated jitters
-	 * Prevail = 0.75 means 75% prevail.
 	 */
-	IoDebounce(IOBITS_u64 InitIOs,
+	IoDebounce(IOBITS_64b InitIOs,
 				unsigned int Depth, 
-				float Prevail,
-				IOBITS_u64 MASK = 0
+				unsigned int Threshold,
+				IOBITS_64b MASK = 0
 				 );
 	~IoDebounce();
-	IOBITS_u64 Sampling(IOBITS_u64 IOs);
-	inline IOBITS_u64 GetOutput(){ return m_OutPutValue; }
+
+	IOBITS_64b JitterControl(IOBITS_64b IOs);
+	inline IOBITS_64b GetOutput(){ return m_OutPutValue; }
+	void SetFilter(unsigned int* depthArray, unsigned int* thresholdArray);
 private:
-	IOBITS_u64 m_Mask;
-	IOBITS_u64 m_InitValue;
-	IOBITS_u64 m_OutPutValue;
-	unsigned int m_nDepth; 
-	unsigned int m_Threshold;
-	
+	IOBITS_64b m_Mask;
+	IOBITS_64b m_InitValue;
+	IOBITS_64b m_OutPutValue;
+	typedef struct _FILTER_PARAM
+	{
+		unsigned int Depths[BITNUMBER];
+		unsigned int Threshold[BITNUMBER];
+
+	};
+	_FILTER_PARAM m_FilterParameters;
 	RingBuffer m_ChangedBitBuffer;
-	/**
+	/** 
 	 * Table element structure: 
 	 *		lowest 8-bits for changed bit index 
 	 *		and the rest for prevail-sum-value.
 	 * max-element number is 64
+	 * 
+	 * Discarded. LiuBin 20081103
 	 */
-	
+	/**	
+	 * no use code.
 	inline unsigned int SetIndex(unsigned int val, unsigned char index)
 	{
 		return (val & (~0xFF)) & (index & 0xFF);
@@ -130,5 +142,6 @@ private:
 	{
 		return (val >> 8);
 	}
+	*/
 };
 #endif
