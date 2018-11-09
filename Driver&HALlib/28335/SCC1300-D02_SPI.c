@@ -91,7 +91,11 @@ static union GYRO_MISO_DATA
 		unsigned int S_Ok		: 1;	// 1
 		unsigned int rsv		: 14;	// 2~15
 	}bits;
-};
+}GD_Ratex, GD_ST, GD_Temp, GD_IC_ID;
+static unsigned int GRDParityCheck(uint16_t data)
+{
+	return (ParityEven_16b(data & (~1)) == (data & 1))
+}
 static typedef union GYRO_MOSI_OPC
 {
 	uint16_t all;
@@ -206,10 +210,7 @@ unsigned int GYRO_ReadRegister(uint16_t Address, uint16_t *Data)
 {
 	uint16_t Status;
 	uint16_t ui16Address = Address;
-	GyroOpc.all = 0;
-	GyroOpc.bits.addr = Address;
-	GyroOpc.bits.RW = OPC_READ;
-	GyroOpc.bits.ParOdd = ParityEven_16b(GyroOpc.all);
+
 	// Build address transfer frame
 	ui16Address <<= 3; // Address to be shifted left by 3
 					   // (and RW = 0)
