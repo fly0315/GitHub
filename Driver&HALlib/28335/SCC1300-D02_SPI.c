@@ -30,9 +30,31 @@
 #define ACC_ID 0x27
  // Gyroscope Registers
 #define GYRO_RATE_X 0x00
+union GYRO_REG_RATEX
+{
+	uint16_t all;
+	struct 
+	{
+		unsigned int oddParity : 1;
+		unsigned int S_OK : 1;
+		unsigned int RateX14 : 14;
+	}bits;
+};
 #define GYRO_IC_ID 0x07
 #define GYRO_STATUS 0x08
+typedef union
+{
+	uint16_t all;
+	struct 
+	{
+		unsigned int oddParity : 1;
+		unsigned int Reserved : 8;
+		unsigned int Parity_OK : 1;
+		unsigned int Reserved01 : 6;
+	}bits;
+}GYRO_REG_STATUS;
 #define GYRO_TEMP 0x0A
+#define GYRO_DUMMY 0x00
  // Gyroscope status and control bits
 #define BIT_LOOPF_OK (1 << 2) // Loopfilter status flag
 #define BIT_SOFTRESET_GYRO (1 << 1) // Gyro soft reset
@@ -71,7 +93,7 @@
 #define PIN_EXTRESN_GYRO (1 << 1)
 static unsigned int ParityEven_16b(uint16_t v)
 {
-	static const bool ParityTableEven_8b[256] =
+	static const unsigned int ParityTableEven_8b[256] =
 	{
 #   define P2(n) n^1, n, n, n^1
 #   define P4(n) P2(n), P2(n^1), P2(n^1), P2(n)
@@ -82,31 +104,14 @@ static unsigned int ParityEven_16b(uint16_t v)
 	return ParityTableEven_8b[p[0] ^ p[1]];
 
 }
-static union GYRO_MISO_DATA
+
+static unsigned int ParityCheck_u16(uint16_t data)
 {
-	uint16_t all;
-	struct  
-	{
-		unsigned int Par_Odd	: 1;	// 0
-		unsigned int S_Ok		: 1;	// 1
-		unsigned int rsv		: 14;	// 2~15
-	}bits;
-}GD_Ratex, GD_ST, GD_Temp, GD_IC_ID;
-static unsigned int GRDParityCheck(uint16_t data)
-{
-	return (ParityEven_16b(data & (~1)) == (data & 1))
+	return (ParityEven_16b(data & (~1)) == (data & 1));
 }
-static typedef union GYRO_MOSI_OPC
-{
-	uint16_t all;
-	struct 
-	{
-		unsigned int ParOdd : 1;
-		unsigned int fixed0 : 1;
-		unsigned int RW		: 1;
-		unsigned int addr	: 13;
-	}bits;
-}GOR_RateX, GOR_ST, GOR_Temp, GOR_IC_ID, GOW_Reset;
+
+static GYRO_MOSI Gyro_RateX, Gyro_Status, Gyro_Temp, Gyro_IC_ID, Gyro_Reset;
+static GYRO_MISO GD_RateX, GD_Status, GD_Temp, GD_IC_ID, GD_Reset;
 static uint16_t GenGyroOpc(unsigned int Addr, unsigned int RW)
 {
 	GYRO_MOSI_OPC OPC;
@@ -120,16 +125,26 @@ static uint16_t GenGyroOpc(unsigned int Addr, unsigned int RW)
 
 unsigned int SCC1300_Init
 (
-	PIN CSB_G, PIN SCK_G, PIN MOSI_G, PIN MISO_G,
-	PIN CSB_A, PIN SCK_A, PIN MOSI_A, PIN MISO_A,
-	unsigned int Baud_G, unsigned int Baud_A
+// 	PIN CSB_G, PIN SCK_G, PIN MOSI_G, PIN MISO_G,
+// 	PIN CSB_A, PIN SCK_A, PIN MOSI_A, PIN MISO_A,
+// 	unsigned int Baud_G, unsigned int Baud_A
 )
 {
-	GOR_RateX.all = GenGyroOpc(GYRO_RATE_X, READ);
-	GOR_ST.all = GenGyroOpc(GYRO_STATUS, READ);
-	GOR_Temp.all = GenGyroOpc(GYRO_TEMP, READ);
-	GOR_IC_ID.all = GenGyroOpc(GYRO_IC_ID, READ);
-	GOW_Reset.all = GenGyroOpc(GYRO_IC_ID, WRITE);
+	Gyro_RateX.opc.all = GenGyroOpc(GYRO_RATE_X, READ);
+	Gyro_RateX.data.all = GenGyroOpc(GYRO_DUMMY, READ);
+
+	Gyro_Status.opc.all = GenGyroOpc(GYRO_STATUS, READ);
+	Gyro_Status.data.all = GenGyroOpc(GYRO_DUMMY, READ);
+
+	Gyro_Temp.opc.all = GenGyroOpc(GYRO_TEMP, READ);
+	Gyro_Temp.data.all = GenGyroOpc(GYRO_DUMMY, READ);
+
+	Gyro_IC_ID.opc.all = GenGyroOpc(GYRO_IC_ID, READ);
+	Gyro_IC_ID.data.all = GenGyroOpc(GYRO_DUMMY, READ);
+
+	Gyro_Reset.opc.all = GenGyroOpc(GYRO_IC_ID, WRITE);
+	Gyro_Reset.data.all = 0x04;
+
 	InitGpio_Spi_A();
 	spi_init();
 	spi_fifo_init();
@@ -206,67 +221,58 @@ void spi_fifo_init()
 	SpiaRegs.SPIFFCT.all = 0x0;
 }
 
-unsigned int GYRO_ReadRegister(uint16_t Address, uint16_t *Data)
+unsigned int GYRO_SPI(const GYRO_MOSI OP, GYRO_MISO *DATA)
 {
-	uint16_t Status;
-	uint16_t ui16Address = Address;
-
-	// Build address transfer frame
-	ui16Address <<= 3; // Address to be shifted left by 3
-					   // (and RW = 0)
-	ui16Address += CalcParity(ui16Address); // Add parity bit
-	LPC_GPIO0->DATA &= ~PIN_CSB_GYRO; // Select gyro sensor
-	Status = LPC_SSP0->DR; // Read RX buffer just to clear
-						   // interrupt flag
-	while ((LPC_SSP0->SR & (SSPSR_TNF | SSPSR_BSY)) != SSPSR_TNF);	// Move on only if NOT busy and TX FIFO
-																	// not full
-	LPC_SSP0->DR = ui16Address >> 8; // Write address MSB to TX buffer
-	while (LPC_SSP0->SR & SSPSR_BSY); // Wait until the Busy bit is cleared
-	Status = LPC_SSP0->DR; // Read RX buffer (status byte MSB)
-	Status <<= 8;
-	LPC_SSP0->DR = ui16Address & 0x00FF; // Write address LSB to TX buffer
-	while (LPC_SSP0->SR & SSPSR_BSY); // Wait until the Busy bit is cleared
-	Status |= LPC_SSP0->DR; // Read RX buffer (status byte LSB)
-	LPC_SSP0->DR = 0; // Write dummy data to TX buffer
-	while (LPC_SSP0->SR & SSPSR_BSY); // Wait until the Busy bit is cleared
-	*Data = LPC_SSP0->DR; // Read RX buffer (data byte MSB)
-	*Data <<= 8;
-	LPC_SSP0->DR = 0x01; // Write dummy data to TX buffer; NOTE:
-						 // even if the data is dummy it still
-						 // needs to have correct parity so
-						 // force odd parity
-						 // (TX 0x0000 -> 0x0001)
-	while (LPC_SSP0->SR & SSPSR_BSY); // Wait until the Busy bit is cleared
-	*Data |= LPC_SSP0->DR; // Read RX buffer (data byte LSB)
-	LPC_GPIO0->DATA |= PIN_CSB_GYRO; // Deselect gyro sensor
-	return Status;
+	Select_Gyro();
+	while (SpiaRegs.SPIFFRX.bit.RXFFST)				// Read RX buffer just to clear interrupt flag
+	{
+		DATA->data.all = SpiaRegs.SPIRXBUF;
+	}
+	while (SpiaRegs.SPIFFTX.bit.TXFFST == 15);		// Move on only if TX FIFO not full
+	SpiaRegs.SPITXBUF = OP.opc.all;					// Write Operate code
+	while (SpiaRegs.SPIFFTX.bit.TXFFST);			// Wait until transmission done
+	DATA->status.all = SpiaRegs.SPIRXBUF;				// Read RX buffer (status word)
+	SpiaRegs.SPITXBUF = OP.data.all;				// Write data to TX buffer;
+	while (SpiaRegs.SPIFFTX.bit.TXFFST);			// Wait until transmission done
+	DATA->data.all = SpiaRegs.SPIRXBUF;			// Read RX buffer(data word)
+	Deselect_Gyro();
+	return 1;
 }
-
 
 void GyroPowerup()
 {
 	// Wait 800 ms
 	// always delay in application.
-// 	DELAY_US(800000);
+//	DELAY_US(80000);
 	// Read status register twice to clear error flags
-	GYRO_ReadRegister(GYRO_STATUS, &Status_Gyro.all);
-	GYRO_ReadRegister(GYRO_STATUS, &Status_Gyro.all);
+	GYRO_SPI(Gyro_Status, &GD_Status);
+	GYRO_SPI(Gyro_Status, &GD_Status);
+
 	// If gyro is ok start reading the sensors
-	while (!(Status_Gyro.bits.S_Ok))
+	while (!(GD_Status.data.bits.S_Ok))
 	{
 		// Gyro error
-		GYRO_ReadRegister(GYRO_STATUS, &Status_Gyro.all); // Read status register to clear error flags
+		GYRO_SPI(Gyro_Status, &GD_Status);				// Read status register to clear error flags
 		DELAY_US(60000);
-		GYRO_ReadRegister(GYRO_STATUS, &Status_Gyro.all); // Read status register to clear flags again
-		if (!(Status_Gyro.bits.Loopf_Ok))
+		GYRO_SPI(Gyro_Status, &GD_Status);				// Read status register to clear flags again
+		if (!(((GYRO_REG_STATUS)GD_Status.data.bits.D14).bits.oddParity))
 		{
-			// If LOOPF still fails, reset gyroscope
-			Status_Gyro = GYRO_WriteRegister(GYRO_IC_ID, BIT_SOFTRESET_GYRO); // Perform soft reset
-			DELAY_US(800000);
-			// Read status register twice to clear error flags
-			GYRO_ReadRegister(GYRO_STATUS, &Status_Gyro);
-			GYRO_ReadRegister(GYRO_STATUS, &Status_Gyro);
+			// If LOOPF still fails, reset gyroscope 
+			GYRO_SPI(Gyro_Reset, &GD_Reset);			// Perform soft reset
+			GyroPowerup();
 		}
 
 	}
+}
+
+int16_t GetGyroRateX()
+{
+	GYRO_SPI(Gyro_RateX, &GD_RateX);
+	return (int16_t)GD_RateX.data.bits.D14;
+}
+
+unsigned int GetGyroMixAccess(int16_t RateX,int16_t Temp)
+{
+
+	return 1;
 }
