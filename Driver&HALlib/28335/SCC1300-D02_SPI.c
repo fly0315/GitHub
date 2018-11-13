@@ -6,6 +6,7 @@
  */
 
 #include "SCC1300-D02_SPI.h"
+#include "DSP28x_Project.h"     // Device Header file and Examples Include File
 #include <assert.h>
 
  // SCC1300 version specific parameters, here SCC1300-D02
@@ -123,6 +124,9 @@ static uint16_t GenGyroOpc(unsigned int Addr, unsigned int RW)
 	return OPC.all;
 }
 
+__interrupt void spiTxFifoIsr(void);
+__interrupt void spiRxFifoIsr(void);
+
 unsigned int SCC1300_Init
 (
 // 	PIN CSB_G, PIN SCK_G, PIN MOSI_G, PIN MISO_G,
@@ -149,6 +153,24 @@ unsigned int SCC1300_Init
 	spi_init();
 	spi_fifo_init();
 
+	// Disable and clear all CPU interrupts
+	DINT;
+	IER = 0x0000;
+	IFR = 0x0000;
+
+	EALLOW;	// This is needed to write to EALLOW protected registers
+	PieVectTable.SPIRXINTA = &spiRxFifoIsr;
+	PieVectTable.SPITXINTA = &spiTxFifoIsr;
+	EDIS;   // This is needed to disable write to EALLOW protected registers
+
+	//
+	// Enable interrupts required for this example
+	//
+	PieCtrlRegs.PIECTRL.bit.ENPIE = 1;   // Enable the PIE block
+	PieCtrlRegs.PIEIER6.bit.INTx1 = 1;     // Enable PIE Group 6, INT 1
+	PieCtrlRegs.PIEIER6.bit.INTx2 = 1;     // Enable PIE Group 6, INT 2
+	IER |= (M_INT6);					 // Enable CPU INT6
+	EINT;                                // Enable Global Interrupts
 }
 
 void InitGpio_Spi_A()
@@ -192,33 +214,62 @@ void InitGpio_Spi_A()
 
 void spi_init()
 {
-	//	SpiaRegs.SPICCR.all = 0x000F;	             // Reset on, rising edge, 16-bit char bits
-	SpiaRegs.SPICCR.bit.SPISWRESET = 0;				// reset on
-	SpiaRegs.SPICCR.bit.CLKPOLARITY = 0;			// rising edge output
-	SpiaRegs.SPICCR.bit.SPILBK = 0;					// loop back disable
-	SpiaRegs.SPICCR.bit.SPICHAR = 0x0F;				// 16-bit
+	SpiaRegs.SPICCR.bit.SPISWRESET = 0;				// bit7. Reset on, run into initial mode
+	SpiaRegs.SPICCR.bit.CLKPOLARITY = 0;			// bit6. 0/1: rising/falling edge output
+	SpiaRegs.SPICCR.bit.SPILBK = 0;					// bit4. Loop back	0:1: disable/enable
+	SpiaRegs.SPICCR.bit.SPICHAR = 0x0F;				// bit3~0. 16-bit
 
-	//	SpiaRegs.SPICTL.all = 0x000E;				// Enable master mode, delay phase, // enable talk, and SPI int disabled.		
-	SpiaRegs.SPICTL.bit.OVERRUNINTENA = 0;			// disable overrun INT
-	SpiaRegs.SPICTL.bit.CLK_PHASE = 0;				// no delay phase
-	SpiaRegs.SPICTL.bit.MASTER_SLAVE = 1;			// master mode
-	SpiaRegs.SPICTL.bit.TALK = 1;					// enable talk
-	SpiaRegs.SPICTL.bit.SPIINTENA = 0;				// disable spi interrupt		
+	SpiaRegs.SPICTL.bit.OVERRUNINTENA = 1;			// bit4. Overrun INT	0/1: disable/enable
+	SpiaRegs.SPICTL.bit.CLK_PHASE = 0;				// bit3. Delay phase	0/1: off/on
+	SpiaRegs.SPICTL.bit.MASTER_SLAVE = 1;			// bit2. 0/1: slave/master mode; 
+	SpiaRegs.SPICTL.bit.TALK = 1;					// bit1. Enable talk
+	SpiaRegs.SPICTL.bit.SPIINTENA = 1;				// bit0. SPI interrupt 0/1: disable/enable		
 
-	SpiaRegs.SPISTS.all = 0x0000;
+	SpiaRegs.SPISTS.all = 0x0000;					// FLAGs 0/1: OperateNull/Clear 
 	SpiaRegs.SPIBRR = 9;							// SPICLK=LSPCLK/(BRR+1)  @LSPCLK = 37.5MHz
-	SpiaRegs.SPICCR.all = 0x008F;					// Relinquish SPI from Reset
-	SpiaRegs.SPIPRI.bit.FREE = 1;					// Set so breakpoints don't disturb xmission
+	SpiaRegs.SPICCR.bit.SPISWRESET = 1;				// Relinquish SPI from Reset, exit from initial mode
+	SpiaRegs.SPIPRI.bit.FREE = 1;					// Set so breakpoints don't disturb mission
 
 }
 
 void spi_fifo_init()
 {
 	// Initialize SPI FIFO registers
-	SpiaRegs.SPIFFTX.all = 0x6040;              //  发送FIFO使能，中断禁止
-	SpiaRegs.SPIFFTX.all = 0xE040;
-	SpiaRegs.SPIFFRX.all = 0x204f;
-	SpiaRegs.SPIFFCT.all = 0x0;
+// 	SpiaRegs.SPIFFTX.all = 0x6040;              //  发送FIFO使能，中断禁止
+// 	SpiaRegs.SPIFFTX.all = 0xE040;
+// 	SpiaRegs.SPIFFRX.all = 0x204f;
+// 	SpiaRegs.SPIFFCT.all = 0x0;
+	//////////////////////////////////////////////////////////////////////////
+
+	SpiaRegs.SPIFFTX.bit.SPIRST = 0;	// bit15.
+	SpiaRegs.SPIFFTX.bit.SPIRST = 1;	// 0: reset SPI register, none for SPIFIFO register
+										// 1: none for SPI register, reset SPIFIFO register
+	
+	SpiaRegs.SPIFFTX.bit.SPIFFENA = 1;	// bit14. 0/1: disable/enable FIFO's
+	SpiaRegs.SPIFFTX.bit.TXFIFO = 0;	// bit13.
+										// 0: reset FIFO pointer to 0 and keep in reset mode
+										// 1: enable TX-FIFO
+	SpiaRegs.SPIFFTX.bit.TXFFST = 0;	// bit12~8. read only. word number in TXBUFFER
+	SpiaRegs.SPIFFTX.bit.TXFFINT = 0;	// bit7. read only. 0/1: interrupt flag no/yes 
+	SpiaRegs.SPIFFTX.bit.TXFFINTCLR = 1;// bit6. write only. 0/1: null/clear TXFIFINT flag
+	SpiaRegs.SPIFFTX.bit.TXFFIENA = 0;	// bit5. 0/1: disable/enable FIFO interrupts
+	SpiaRegs.SPIFFTX.bit.TXFFIL = 0;	// bit4~0. 
+
+	SpiaRegs.SPIFFTX.bit.TXFIFO = 1;
+	//////////////////////////////////////////////////////////////////////////
+	SpiaRegs.SPIFFRX.bit.RXFFOVF = 0;	// bit15. read only.
+	SpiaRegs.SPIFFRX.bit.RXFFOVFCLR = 0;// bit14. write only. 0/1: none/clear RXFFOVF flag
+	SpiaRegs.SPIFFRX.bit.RXFIFORESET = 0;// bit13. 0/1: reset FIFO RX-POINTER/enable RX FIFO
+	SpiaRegs.SPIFFRX.bit.RXFFST = 0;	// bit12~8. read only. word number int RXBUFFER
+	SpiaRegs.SPIFFRX.bit.RXFFINT = 0;	// bit7. read only. 0/1: interrupt flag no/yes
+	SpiaRegs.SPIFFRX.bit.RXFFINTCLR = 0;// bit6. write only. 0/1: null/ clear RXFFINT flag
+	SpiaRegs.SPIFFRX.bit.RXFFIENA = 1;	// bit5. 0/1: disable/enable RXFIFO interrupt
+	SpiaRegs.SPIFFRX.bit.RXFFIL = 0x0F;	// bit4~0.
+
+	SpiaRegs.SPIFFRX.bit.RXFIFORESET = 1;
+	//////////////////////////////////////////////////////////////////////////
+	SpiaRegs.SPIFFCT.bit.TXDLY = 0x00;	// bit7~0.
+
 }
 
 unsigned int GYRO_SPI(const GYRO_MOSI OP, GYRO_MISO *DATA)
@@ -266,7 +317,7 @@ void GyroPowerup()
 }
 
 int16_t GetGyroRateX()
-{
+{ 
 	GYRO_SPI(Gyro_RateX, &GD_RateX);
 	return (int16_t)GD_RateX.data.bits.D14;
 }
@@ -275,4 +326,43 @@ unsigned int GetGyroMixAccess(int16_t RateX,int16_t Temp)
 {
 
 	return 1;
+}
+
+//
+// spiTxFifoIsr -
+//
+__interrupt void
+spiTxFifoIsr(void)
+{
+	Uint16 i;
+	for (i = 0; i < 16; i++)
+	{
+		SpiaRegs.SPITXBUF = i;      // Send data
+	}
+
+
+
+	SpiaRegs.SPIFFTX.bit.TXFFINTCLR = 1;  // Clear Interrupt flag
+	PieCtrlRegs.PIEACK.all |= 0x20;  		// Issue PIE ACK
+}
+
+//
+// spiRxFifoIsr - 
+//
+__interrupt void
+spiRxFifoIsr(void)
+{
+	Uint16 i, rdata[16];
+	for (i = 0; i < SpiaRegs.SPIFFRX.bit.RXFFST; i++)
+	{
+		rdata[i] = SpiaRegs.SPIRXBUF;		// Read data
+	}
+
+	
+
+
+
+	SpiaRegs.SPIFFRX.bit.RXFFOVFCLR = 1;  // Clear Overflow flag
+	SpiaRegs.SPIFFRX.bit.RXFFINTCLR = 1; 	// Clear Interrupt flag
+	PieCtrlRegs.PIEACK.all |= 0x20;       // Issue PIE ack
 }
