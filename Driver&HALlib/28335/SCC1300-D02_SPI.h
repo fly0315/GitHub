@@ -69,4 +69,4 @@ extern "C" {
 #endif /* extern "C" */
 
 
-#endif /* GPIOCONFIG_H_ */
+#endif /* SCC1300-D02_SPI_H */

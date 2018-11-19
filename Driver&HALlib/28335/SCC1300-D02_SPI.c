@@ -6,7 +6,7 @@
  */
 
 #include "SCC1300-D02_SPI.h"
-#include "DSP28x_Project.h"     // Device Header file and Examples Include File
+
 #include <assert.h>
 
  // SCC1300 version specific parameters, here SCC1300-D02
@@ -92,6 +92,15 @@ typedef union
 #define PIN_CSB_GYRO (1 << 2)
 #define PIN_CSB_ACC (1 << 0)
 #define PIN_EXTRESN_GYRO (1 << 1)
+typedef union
+{
+    uint16_t data;
+    struct
+    {
+        unsigned L: 8;
+        unsigned H: 8;
+    }bit;
+}W2C;
 static unsigned int ParityEven_16b(uint16_t v)
 {
 	static const unsigned int ParityTableEven_8b[256] =
@@ -101,8 +110,9 @@ static unsigned int ParityEven_16b(uint16_t v)
 #   define P6(n) P4(n), P4(n^1), P4(n^1), P4(n)
 		P6(0), P6(1), P6(1), P6(0)
 	};
-	unsigned char * p = (unsigned char *)&v;
-	return ParityTableEven_8b[p[0] ^ p[1]];
+//	unsigned char* p = (unsigned char *)&v;
+	W2C *p = (W2C*)&v;
+	return ParityTableEven_8b[p->bit.L ^ p->bit.H];
 
 }
 
@@ -123,7 +133,9 @@ static uint16_t GenGyroOpc(unsigned int Addr, unsigned int RW)
 	OPC.bits.ParOdd = ParityEven_16b(OPC.all);
 	return OPC.all;
 }
-
+static void InitGpio_Spi_A();
+static void spi_init();
+static void spi_fifo_init();
 __interrupt void spiTxFifoIsr(void);
 __interrupt void spiRxFifoIsr(void);
 
@@ -150,8 +162,12 @@ unsigned int SCC1300_Init
 	Gyro_Reset.data.all = 0x04;
 
 	InitGpio_Spi_A();
-	spi_init();
+
 	spi_fifo_init();
+	spi_init();
+
+//	Select_Gyro();
+	/*
 
 	// Disable and clear all CPU interrupts
 	DINT;
@@ -171,6 +187,9 @@ unsigned int SCC1300_Init
 	PieCtrlRegs.PIEIER6.bit.INTx2 = 1;     // Enable PIE Group 6, INT 2
 	IER |= (M_INT6);					 // Enable CPU INT6
 	EINT;                                // Enable Global Interrupts
+	*/
+	return 1;
+
 }
 
 void InitGpio_Spi_A()
@@ -194,8 +213,8 @@ void InitGpio_Spi_A()
 	GpioCtrlRegs.GPBQSEL2.bit.GPIO54 = 3; // Asynch input GPIO54 (SPISIMOA)
 	GpioCtrlRegs.GPBQSEL2.bit.GPIO55 = 3; // Asynch input GPIO55 (SPISOMIA)
 	GpioCtrlRegs.GPBQSEL2.bit.GPIO56 = 3; // Asynch input GPIO56 (SPICLKA)
-	GpioCtrlRegs.GPBQSEL2.bit.GPIO57 = 0; // Asynch input GPIO57 (SPISTEA GPIO MODE)
-
+//	GpioCtrlRegs.GPBQSEL2.bit.GPIO57 = 0; // Asynch input GPIO57 (SPISTEA GPIO MODE)
+	GpioCtrlRegs.GPBQSEL2.bit.GPIO57 = 3;
 	//
 	// Configure SPI-A pins using GPIO regs
 	// This specifies which of the possible GPIO pins will be SPI
@@ -204,10 +223,12 @@ void InitGpio_Spi_A()
 	GpioCtrlRegs.GPBMUX2.bit.GPIO54 = 1; // Configure GPIO54 as SPISIMOA
 	GpioCtrlRegs.GPBMUX2.bit.GPIO55 = 1; // Configure GPIO55 as SPISOMIA
 	GpioCtrlRegs.GPBMUX2.bit.GPIO56 = 1; // Configure GPIO56 as SPICLKA
-	GpioCtrlRegs.GPBMUX2.bit.GPIO57 = 0; // Configure GPIO57 as GPIO (CS)
+//	GpioCtrlRegs.GPBMUX2.bit.GPIO57 = 0; // Configure GPIO57 as GPIO (CS)
+	GpioCtrlRegs.GPBMUX2.bit.GPIO57 = 1;
 
-	GpioCtrlRegs.GPBDIR.bit.GPIO57 = 1;  // Set as output
-	GpioDataRegs.GPBDAT.bit.GPIO57 = 1;  // Set value 1
+//	GpioCtrlRegs.GPBDIR.bit.GPIO57 = 1;  // Set as output
+//	GpioDataRegs.GPBDAT.bit.GPIO57 = 1;  // Set value 1
+
 
 	EDIS;
 }
@@ -219,13 +240,13 @@ void spi_init()
 	SpiaRegs.SPICCR.bit.SPILBK = 0;					// bit4. Loop back	0:1: disable/enable
 	SpiaRegs.SPICCR.bit.SPICHAR = 0x0F;				// bit3~0. 16-bit
 
-	SpiaRegs.SPICTL.bit.OVERRUNINTENA = 1;			// bit4. Overrun INT	0/1: disable/enable
-	SpiaRegs.SPICTL.bit.CLK_PHASE = 0;				// bit3. Delay phase	0/1: off/on
+	SpiaRegs.SPICTL.bit.OVERRUNINTENA = 0;			// bit4. Overrun INT	0/1: disable/enable
+	SpiaRegs.SPICTL.bit.CLK_PHASE = 1;				// bit3. Delay phase	0/1: off/on
 	SpiaRegs.SPICTL.bit.MASTER_SLAVE = 1;			// bit2. 0/1: slave/master mode; 
 	SpiaRegs.SPICTL.bit.TALK = 1;					// bit1. Enable talk
-	SpiaRegs.SPICTL.bit.SPIINTENA = 1;				// bit0. SPI interrupt 0/1: disable/enable		
+	SpiaRegs.SPICTL.bit.SPIINTENA = 0;				// bit0. SPI interrupt 0/1: disable/enable
 
-	SpiaRegs.SPISTS.all = 0x0000;					// FLAGs 0/1: OperateNull/Clear 
+	SpiaRegs.SPISTS.all = 0x0000;					// FLAGs 0/1: Operate Null/Clear
 	SpiaRegs.SPIBRR = 9;							// SPICLK=LSPCLK/(BRR+1)  @LSPCLK = 37.5MHz
 	SpiaRegs.SPICCR.bit.SPISWRESET = 1;				// Relinquish SPI from Reset, exit from initial mode
 	SpiaRegs.SPIPRI.bit.FREE = 1;					// Set so breakpoints don't disturb mission
@@ -244,7 +265,6 @@ void spi_fifo_init()
 	SpiaRegs.SPIFFTX.bit.SPIRST = 0;	// bit15.
 	SpiaRegs.SPIFFTX.bit.SPIRST = 1;	// 0: reset SPI register, none for SPIFIFO register
 										// 1: none for SPI register, reset SPIFIFO register
-	
 	SpiaRegs.SPIFFTX.bit.SPIFFENA = 1;	// bit14. 0/1: disable/enable FIFO's
 	SpiaRegs.SPIFFTX.bit.TXFIFO = 0;	// bit13.
 										// 0: reset FIFO pointer to 0 and keep in reset mode
@@ -256,17 +276,22 @@ void spi_fifo_init()
 	SpiaRegs.SPIFFTX.bit.TXFFIL = 0;	// bit4~0. 
 
 	SpiaRegs.SPIFFTX.bit.TXFIFO = 1;
+
+//	SpiaRegs.SPIFFTX.all = 0x6040;
+//	SpiaRegs.SPIFFTX.all = 0xE040;
 	//////////////////////////////////////////////////////////////////////////
 	SpiaRegs.SPIFFRX.bit.RXFFOVF = 0;	// bit15. read only.
 	SpiaRegs.SPIFFRX.bit.RXFFOVFCLR = 0;// bit14. write only. 0/1: none/clear RXFFOVF flag
-	SpiaRegs.SPIFFRX.bit.RXFIFORESET = 0;// bit13. 0/1: reset FIFO RX-POINTER/enable RX FIFO
+	SpiaRegs.SPIFFRX.bit.RXFIFORESET = 1;// bit13. 0/1: reset FIFO RX-POINTER/enable RX FIFO
 	SpiaRegs.SPIFFRX.bit.RXFFST = 0;	// bit12~8. read only. word number int RXBUFFER
 	SpiaRegs.SPIFFRX.bit.RXFFINT = 0;	// bit7. read only. 0/1: interrupt flag no/yes
-	SpiaRegs.SPIFFRX.bit.RXFFINTCLR = 0;// bit6. write only. 0/1: null/ clear RXFFINT flag
-	SpiaRegs.SPIFFRX.bit.RXFFIENA = 1;	// bit5. 0/1: disable/enable RXFIFO interrupt
+	SpiaRegs.SPIFFRX.bit.RXFFINTCLR = 1;// bit6. write only. 0/1: null/ clear RXFFINT flag
+	SpiaRegs.SPIFFRX.bit.RXFFIENA = 0;	// bit5. 0/1: disable/enable RXFIFO interrupt
 	SpiaRegs.SPIFFRX.bit.RXFFIL = 0x0F;	// bit4~0.
 
 	SpiaRegs.SPIFFRX.bit.RXFIFORESET = 1;
+
+//	SpiaRegs.SPIFFRX.all = 0x204f;
 	//////////////////////////////////////////////////////////////////////////
 	SpiaRegs.SPIFFCT.bit.TXDLY = 0x00;	// bit7~0.
 
@@ -274,52 +299,68 @@ void spi_fifo_init()
 
 unsigned int GYRO_SPI(const GYRO_MOSI OP, GYRO_MISO *DATA)
 {
-	Select_Gyro();
+//	Select_Gyro();
 	while (SpiaRegs.SPIFFRX.bit.RXFFST)				// Read RX buffer just to clear interrupt flag
 	{
 		DATA->data.all = SpiaRegs.SPIRXBUF;
 	}
 	while (SpiaRegs.SPIFFTX.bit.TXFFST == 15);		// Move on only if TX FIFO not full
+
 	SpiaRegs.SPITXBUF = OP.opc.all;					// Write Operate code
-	while (SpiaRegs.SPIFFTX.bit.TXFFST);			// Wait until transmission done
-	DATA->status.all = SpiaRegs.SPIRXBUF;				// Read RX buffer (status word)
 	SpiaRegs.SPITXBUF = OP.data.all;				// Write data to TX buffer;
-	while (SpiaRegs.SPIFFTX.bit.TXFFST);			// Wait until transmission done
-	DATA->data.all = SpiaRegs.SPIRXBUF;			// Read RX buffer(data word)
-	Deselect_Gyro();
+	while (SpiaRegs.SPIFFRX.bit.RXFFST != 2);			// Wait until transmission done
+	DATA->status.all = SpiaRegs.SPIRXBUF;               // Read RX buffer (status word)
+	DATA->data.all = SpiaRegs.SPIRXBUF;             // Read RX buffer(data word)
+
+//	Deselect_Gyro();
 	return 1;
 }
 
 void GyroPowerup()
+
 {
 	// Wait 800 ms
 	// always delay in application.
-//	DELAY_US(80000);
-	// Read status register twice to clear error flags
+    int i;
+    for (i = 0; i < 1000; i++)
+    {
+        DELAY_US(800);
+    }
+
+    // Read status register twice to clear error flags
 	GYRO_SPI(Gyro_Status, &GD_Status);
 	GYRO_SPI(Gyro_Status, &GD_Status);
 
 	// If gyro is ok start reading the sensors
 	while (!(GD_Status.data.bits.S_Ok))
 	{
+
 		// Gyro error
 		GYRO_SPI(Gyro_Status, &GD_Status);				// Read status register to clear error flags
-		DELAY_US(60000);
+		for (i = 0; i < 100; i++)
+        {
+            DELAY_US(600);
+        }
 		GYRO_SPI(Gyro_Status, &GD_Status);				// Read status register to clear flags again
 		if (!(((GYRO_REG_STATUS)GD_Status.data.bits.D14).bits.oddParity))
 		{
-			// If LOOPF still fails, reset gyroscope 
+			// If LOOPF still fails, reset gyroscope
 			GYRO_SPI(Gyro_Reset, &GD_Reset);			// Perform soft reset
+			for (i = 0; i < 1000; i++)
+            {
+                DELAY_US(800);
+            }
 			GyroPowerup();
 		}
 
 	}
+
 }
 
 int16_t GetGyroRateX()
-{ 
+{
 	GYRO_SPI(Gyro_RateX, &GD_RateX);
-	return (int16_t)GD_RateX.data.bits.D14;
+	return ((int16_t)GD_RateX.data.all >> 2);
 }
 
 unsigned int GetGyroMixAccess(int16_t RateX,int16_t Temp)
