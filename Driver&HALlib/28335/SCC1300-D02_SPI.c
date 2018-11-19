@@ -56,42 +56,51 @@ typedef union
 }GYRO_REG_STATUS;
 #define GYRO_TEMP 0x0A
 #define GYRO_DUMMY 0x00
- // Gyroscope status and control bits
-#define BIT_LOOPF_OK (1 << 2) // Loopfilter status flag
-#define BIT_SOFTRESET_GYRO (1 << 1) // Gyro soft reset
- // SSP Status register
-#define SSPSR_TFE (1 << 0)
-#define SSPSR_TNF (1 << 1)
-#define SSPSR_RNE (1 << 2)
-#define SSPSR_RFF (1 << 3)
-#define SSPSR_BSY (1 << 4)
- // GPIO ports
-#define PORT0 0
-#define PORT1 1
-#define PORT2 2
-#define PORT3 3
- // SPI read and write buffer size
-#define FIFOSIZE 8
- // SSP CR0 register
-#define SSPCR0_DSS (1 << 0)
-#define SSPCR0_FRF (1 << 4)
-#define SSPCR0_SPO (1 << 6)
-#define SSPCR0_SPH (1 << 7)
-#define SSPCR0_SCR (1 << 8)
- // SSP CR1 register
-#define SSPCR1_LBM (1 << 0)
-#define SSPCR1_SSE (1 << 1)
-#define SSPCR1_MS (1 << 2)
-#define SSPCR1_SOD (1 << 3)
- // SSP Interrupt Mask Set/Clear register
-#define SSPIMSC_RORIM (1 << 0)
-#define SSPIMSC_RTIM (1 << 1)
-#define SSPIMSC_RXIM (1 << 2)
-#define SSPIMSC_TXIM (1 << 3)
- // Pin definitions
-#define PIN_CSB_GYRO (1 << 2)
-#define PIN_CSB_ACC (1 << 0)
-#define PIN_EXTRESN_GYRO (1 << 1)
+ 
+typedef union
+{
+	uint16_t all;
+	struct
+	{
+		unsigned int ParOdd : 1;
+		unsigned int fixed0 : 1;
+		unsigned int RW : 1;
+		unsigned int addr : 13;
+	}bits;
+}GYRO_MOSI_OPC;
+typedef union
+{
+	uint16_t all;
+	struct
+	{
+		unsigned int Par_Odd : 1;	// 0
+		unsigned int S_Ok : 1;	// 1
+		unsigned int D14 : 14;	// 2~15
+	}bits;
+}GYRO_MISO_DATA;
+typedef struct
+{
+	GYRO_MOSI_OPC opc;
+	GYRO_MOSI_OPC data;
+}GYRO_MOSI;
+typedef struct
+{
+	GYRO_MISO_DATA status;
+	GYRO_MISO_DATA data;
+}GYRO_MISO;
+typedef struct 
+{
+	GYRO_MOSI_OPC rateX_OPC;
+	GYRO_MOSI_OPC Temp_OPC;
+	GYRO_MOSI_OPC DUMMY;
+}GYRO_MOSI_MIX;
+typedef struct
+{
+	GYRO_MISO_DATA status;
+	GYRO_MISO_DATA rateX;
+	GYRO_MISO_DATA temperature;
+}GYRO_MISO_MIX;
+
 typedef union
 {
     uint16_t data;
@@ -123,6 +132,8 @@ static unsigned int ParityCheck_u16(uint16_t data)
 
 static GYRO_MOSI Gyro_RateX, Gyro_Status, Gyro_Temp, Gyro_IC_ID, Gyro_Reset;
 static GYRO_MISO GD_RateX, GD_Status, GD_Temp, GD_IC_ID, GD_Reset;
+static GYRO_MOSI_MIX Gyro_mix;
+static GYRO_MISO_MIX GD_mix;
 static uint16_t GenGyroOpc(unsigned int Addr, unsigned int RW)
 {
 	GYRO_MOSI_OPC OPC;
@@ -160,6 +171,10 @@ unsigned int SCC1300_Init
 
 	Gyro_Reset.opc.all = GenGyroOpc(GYRO_IC_ID, WRITE);
 	Gyro_Reset.data.all = 0x04;
+
+	Gyro_mix.rateX_OPC.all = GenGyroOpc(GYRO_RATE_X, READ);
+	Gyro_mix.Temp_OPC.all = GenGyroOpc(GYRO_TEMP, READ);
+	Gyro_mix.DUMMY.all = GenGyroOpc(GYRO_DUMMY, READ);
 
 	InitGpio_Spi_A();
 
@@ -334,7 +349,6 @@ void GyroPowerup()
 	// If gyro is ok start reading the sensors
 	while (!(GD_Status.data.bits.S_Ok))
 	{
-
 		// Gyro error
 		GYRO_SPI(Gyro_Status, &GD_Status);				// Read status register to clear error flags
 		for (i = 0; i < 100; i++)
@@ -345,16 +359,21 @@ void GyroPowerup()
 		if (!(((GYRO_REG_STATUS)GD_Status.data.bits.D14).bits.oddParity))
 		{
 			// If LOOPF still fails, reset gyroscope
-			GYRO_SPI(Gyro_Reset, &GD_Reset);			// Perform soft reset
-			for (i = 0; i < 1000; i++)
-            {
-                DELAY_US(800);
-            }
-			GyroPowerup();
+			GyroReset();
 		}
 
 	}
 
+}
+
+void GyroReset()
+{
+	GYRO_SPI(Gyro_Reset, &GD_Reset);			// Perform soft reset
+	for (i = 0; i < 1000; i++)
+	{
+		DELAY_US(800);
+	}
+	GyroPowerup();
 }
 
 int16_t GetGyroRateX()
@@ -365,7 +384,19 @@ int16_t GetGyroRateX()
 
 unsigned int GetGyroMixAccess(int16_t RateX,int16_t Temp)
 {
+	while (SpiaRegs.SPIFFRX.bit.RXFFST)				// Read RX buffer just to clear interrupt flag
+	{
+		DATA->data.all = SpiaRegs.SPIRXBUF;
+	}
+	while (SpiaRegs.SPIFFTX.bit.TXFFST == 15);		// Move on only if TX FIFO not full
 
+	SpiaRegs.SPITXBUF = Gyro_mix.rateX_OPC.all;				// Write rate-X address
+	SpiaRegs.SPITXBUF = Gyro_mix.Temp_OPC.all;				// Write temperature address
+	SpiaRegs.SPITXBUF = Gyro_mix.DUMMY.all;					// Zero Vector
+	while (SpiaRegs.SPIFFRX.bit.RXFFST != 3);			// Wait until transmission done
+	GD_mix.status.all = SpiaRegs.SPIRXBUF;               // Read RX buffer (status word)
+	GD_mix.rateX.all = SpiaRegs.SPIRXBUF;
+	GD_mix.temperature.all = SpiaRegs.SPIRXBUF;             // Read RX buffer(data word)
 	return 1;
 }
 
