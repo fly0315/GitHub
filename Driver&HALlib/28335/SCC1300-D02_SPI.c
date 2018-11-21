@@ -144,9 +144,14 @@ static uint16_t GenGyroOpc(unsigned int Addr, unsigned int RW)
 	OPC.bits.ParOdd = ParityEven_16b(OPC.all);
 	return OPC.all;
 }
-static void InitGpio_Spi_A();
+static void InitData();
+static void InitSpi_Gyro();
+static void InitSpi_Acc();
+static void InitGpio_Spi_Gyro();
+static void InitGpio_Spi_Acc();
 static void spi_init();
 static void spi_fifo_init();
+static void spi_mcbspB_Acc();
 __interrupt void spiTxFifoIsr(void);
 __interrupt void spiRxFifoIsr(void);
 
@@ -157,31 +162,10 @@ unsigned int SCC1300_Init
 // 	unsigned int Baud_G, unsigned int Baud_A
 )
 {
-	Gyro_RateX.opc.all = GenGyroOpc(GYRO_RATE_X, READ);
-	Gyro_RateX.data.all = GenGyroOpc(GYRO_DUMMY, READ);
+	InitData();
 
-	Gyro_Status.opc.all = GenGyroOpc(GYRO_STATUS, READ);
-	Gyro_Status.data.all = GenGyroOpc(GYRO_DUMMY, READ);
+	InitSpi_Gyro();
 
-	Gyro_Temp.opc.all = GenGyroOpc(GYRO_TEMP, READ);
-	Gyro_Temp.data.all = GenGyroOpc(GYRO_DUMMY, READ);
-
-	Gyro_IC_ID.opc.all = GenGyroOpc(GYRO_IC_ID, READ);
-	Gyro_IC_ID.data.all = GenGyroOpc(GYRO_DUMMY, READ);
-
-	Gyro_Reset.opc.all = GenGyroOpc(GYRO_IC_ID, WRITE);
-	Gyro_Reset.data.all = 0x04;
-
-	Gyro_mix.rateX_OPC.all = GenGyroOpc(GYRO_RATE_X, READ);
-	Gyro_mix.Temp_OPC.all = GenGyroOpc(GYRO_TEMP, READ);
-	Gyro_mix.DUMMY.all = GenGyroOpc(GYRO_DUMMY, READ);
-
-	InitGpio_Spi_A();
-
-	spi_fifo_init();
-	spi_init();
-
-//	Select_Gyro();
 	/*
 
 	// Disable and clear all CPU interrupts
@@ -207,7 +191,42 @@ unsigned int SCC1300_Init
 
 }
 
-void InitGpio_Spi_A()
+void InitData()
+{
+	Gyro_RateX.opc.all = GenGyroOpc(GYRO_RATE_X, READ);
+	Gyro_RateX.data.all = GenGyroOpc(GYRO_DUMMY, READ);
+
+	Gyro_Status.opc.all = GenGyroOpc(GYRO_STATUS, READ);
+	Gyro_Status.data.all = GenGyroOpc(GYRO_DUMMY, READ);
+
+	Gyro_Temp.opc.all = GenGyroOpc(GYRO_TEMP, READ);
+	Gyro_Temp.data.all = GenGyroOpc(GYRO_DUMMY, READ);
+
+	Gyro_IC_ID.opc.all = GenGyroOpc(GYRO_IC_ID, READ);
+	Gyro_IC_ID.data.all = GenGyroOpc(GYRO_DUMMY, READ);
+
+	Gyro_Reset.opc.all = GenGyroOpc(GYRO_IC_ID, WRITE);
+	Gyro_Reset.data.all = 0x04;
+
+	Gyro_mix.rateX_OPC.all = GenGyroOpc(GYRO_RATE_X, READ);
+	Gyro_mix.Temp_OPC.all = GenGyroOpc(GYRO_TEMP, READ);
+	Gyro_mix.DUMMY.all = GenGyroOpc(GYRO_DUMMY, READ);
+}
+
+void InitSpi_Gyro()
+{
+	InitGpio_Spi_Gyro();
+
+	spi_fifo_init();
+	spi_init();
+}
+
+void InitSpi_Acc()
+{
+	InitGpio_Spi_Acc();
+}
+
+void InitGpio_Spi_Gyro()
 {
 	EALLOW;
 
@@ -312,6 +331,119 @@ void spi_fifo_init()
 
 }
 
+void InitGpio_Spi_Acc()
+{
+	EALLOW;
+
+	//
+	// Configure McBSP-B pins using GPIO regs
+
+	GpioCtrlRegs.GPAMUX2.bit.GPIO24 = 3;        // GPIO24 is MDXB pin
+	GpioCtrlRegs.GPAMUX2.bit.GPIO25 = 3;        // GPIO25 is MDRB pin
+	GpioCtrlRegs.GPAMUX2.bit.GPIO26 = 3;        // GPIO26 is MCLKXB pin
+	GpioCtrlRegs.GPBMUX2.bit.GPIO60 = 1;      // GPIO60 is MCLKRB pin
+	GpioCtrlRegs.GPAMUX2.bit.GPIO27 = 3;        // GPIO27 is MFSXB pin
+	GpioCtrlRegs.GPBMUX2.bit.GPIO61 = 1;      // GPIO61 is MFSRB pin
+
+	//
+	// Enable internal pull-up for the selected pins
+	// Pull-ups can be enabled or disabled by the user.
+	// This will enable the pullups for the specified pins.
+	// Comment out other unwanted lines.
+	//
+	GpioCtrlRegs.GPAPUD.bit.GPIO24 = 0;     //Enable pull-up on GPIO24 (MDXB)
+	GpioCtrlRegs.GPAPUD.bit.GPIO25 = 0;     //Enable pull-up on GPIO25 (MDRB)
+	GpioCtrlRegs.GPAPUD.bit.GPIO26 = 0;     //Enable pull-up on GPIO26 (MCLKXB)
+	GpioCtrlRegs.GPBPUD.bit.GPIO60 = 0;   //Enable pull-up on GPIO60 (MCLKRB)
+	GpioCtrlRegs.GPAPUD.bit.GPIO27 = 0;     //Enable pull-up on GPIO27 (MFSXB)
+	GpioCtrlRegs.GPBPUD.bit.GPIO61 = 0;   //Enable pull-up on GPIO61 (MFSRB)
+
+	//
+	// Set qualification for selected input pins to asynch only
+	// This will select asynch (no qualification) for the selected pins.
+	// Comment out other unwanted lines.
+	//
+	GpioCtrlRegs.GPAQSEL2.bit.GPIO25 = 3;   // Asynch input GPIO25 (MDRB)
+	GpioCtrlRegs.GPAQSEL2.bit.GPIO26 = 3;   // Asynch input GPIO26(MCLKXB)
+	GpioCtrlRegs.GPBQSEL2.bit.GPIO60 = 3; // Asynch input GPIO60 (MCLKRB)
+	GpioCtrlRegs.GPAQSEL2.bit.GPIO27 = 3;   // Asynch input GPIO27 (MFSXB)
+	GpioCtrlRegs.GPBQSEL2.bit.GPIO61 = 3; // Asynch input GPIO61 (MFSRB)
+
+	EDIS;
+}
+
+void spi_mcbspB_Acc()
+{
+	//
+	// McBSP-B register settings
+	//
+
+	//
+	// Reset Receiver, Right justify word, Digital loopback dis.
+	//
+	McbspbRegs.SPCR1.all = 0x0000;
+	//
+	// Reset FS generator, sample rate generator & transmitter
+	//
+	McbspbRegs.SPCR2.all = 0x0000;
+
+	McbspbRegs.SPCR1.bit.DLB = 0;	// 0/1: loop back mode disable/enable
+	McbspbRegs.SPCR1.bit.RJUST = 0;	// 0: Right alignment, MSBs fill 0
+									// 1: Right alignment, MSBs fill symbol bits
+									// 2: left alignment, LSBs file 0
+									// 3: reserved
+	McbspbRegs.SPCR1.bit.CLKSTP = 3;// 时钟停止模式标志位。
+									// 0~1: 禁止时钟停止模式
+									// 2: 使能该模式，无时钟延时
+									// 3: 使能该模式，延时半个时钟。
+	McbspbRegs.SPCR1.bit.DXENA = 0;	// 外部DX引脚延时使能标志位
+									// 0: 延时禁止
+									// 1：延时使能
+	McbspbRegs.SPCR1.bit.RINTM = 0;	// 接收中断模式标志位，用来决定何种事件触发McBSP接收中断请求（RINT）
+									// 0: RRDY标志位为1，McBSP向CPU发送RINT
+									// 1: 
+
+	
+
+
+	//
+	// (CLKXM=CLKRM=FSXM=FSRM= 1, FSXP = 1)
+	//
+	McbspbRegs.PCR.all = 0x0F08;
+
+	McbspbRegs.SPCR1.bit.DLB = 1;
+
+	//
+	// Together with CLKXP/CLKRP determines clocking scheme
+	//
+	McbspbRegs.SPCR1.bit.CLKSTP = 2;
+
+	McbspbRegs.PCR.bit.CLKXP = 0;	 // CPOL = 0, CPHA = 0 rising edge no delay
+	McbspbRegs.PCR.bit.CLKRP = 0;
+
+	//
+	// FSX setup time 1 in master mode. 0 for slave mode (Receive)
+	//
+	McbspbRegs.RCR2.bit.RDATDLY = 01;
+
+	//
+	// FSX setup time 1 in master mode. 0 for slave mode (Transmit)
+	//
+	McbspbRegs.XCR2.bit.XDATDLY = 01;
+
+	McbspbRegs.RCR1.bit.RWDLEN1 = 5;   // 32-bit word
+	McbspbRegs.XCR1.bit.XWDLEN1 = 5;   // 32-bit word
+
+	McbspbRegs.SRGR2.all = 0x2000; 	 // CLKSM=1, FPER = 1 CLKG periods
+	McbspbRegs.SRGR1.all = 0x000F;	 // Frame Width = 1 CLKG period, CLKGDV=16
+
+	McbspbRegs.SPCR2.bit.GRST = 1;     // Enable the sample rate generator
+	delay_loop();                    // Wait at least 2 SRG clock cycles
+	McbspbRegs.SPCR2.bit.XRST = 1;     // Release TX from Reset
+	McbspbRegs.SPCR1.bit.RRST = 1;     // Release RX from Reset
+	McbspbRegs.SPCR2.bit.FRST = 1;     // Frame Sync Generator reset
+}
+
 unsigned int GYRO_SPI(const GYRO_MOSI OP, GYRO_MISO *DATA)
 {
 //	Select_Gyro();
@@ -359,21 +491,11 @@ void GyroPowerup()
 		if (!(((GYRO_REG_STATUS)GD_Status.data.bits.D14).bits.oddParity))
 		{
 			// If LOOPF still fails, reset gyroscope
-			GyroReset();
+		    GYRO_SPI(Gyro_Reset, &GD_Reset);            // Perform soft reset
+		    GyroPowerup();
 		}
 
 	}
-
-}
-
-void GyroReset()
-{
-	GYRO_SPI(Gyro_Reset, &GD_Reset);			// Perform soft reset
-	for (i = 0; i < 1000; i++)
-	{
-		DELAY_US(800);
-	}
-	GyroPowerup();
 }
 
 int16_t GetGyroRateX()
@@ -386,9 +508,9 @@ unsigned int GetGyroMixAccess(int16_t RateX,int16_t Temp)
 {
 	while (SpiaRegs.SPIFFRX.bit.RXFFST)				// Read RX buffer just to clear interrupt flag
 	{
-		DATA->data.all = SpiaRegs.SPIRXBUF;
+		Temp = SpiaRegs.SPIRXBUF;
 	}
-	while (SpiaRegs.SPIFFTX.bit.TXFFST == 15);		// Move on only if TX FIFO not full
+	while (SpiaRegs.SPIFFTX.bit.TXFFST == 13);		// Move on only if TX FIFO not full
 
 	SpiaRegs.SPITXBUF = Gyro_mix.rateX_OPC.all;				// Write rate-X address
 	SpiaRegs.SPITXBUF = Gyro_mix.Temp_OPC.all;				// Write temperature address

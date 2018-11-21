@@ -27,13 +27,7 @@ extern "C" {
 // 		unsigned int Baud_G, unsigned int Baud_A
 	);
 	void GyroPowerup();
-	void GyroReset();
-	// Enable/Disable CSB_G
-// 	static inline void CSBEnable_G(unsigned int IsEnable) { GpioDataRegs.GPBDAT.bit.GPIO57 = IsEnable; }
-// 	inline void Select_Gyro() { CSBEnable_G(ENABLE); }
-// 	inline void Deselect_Gyro() { CSBEnable_G(DISABLE); }
 	int16_t GetGyroRateX();
-	static inline void CSBEnable_A(unsigned int IsEnable) { GpioDataRegs.GPBDAT.bit.GPIO61 = IsEnable; }
 
 #ifdef __cplusplus
 }
