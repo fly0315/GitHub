@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<projectDescription>
+	<name>AccGyroPro_YW_28335</name>
+	<comment></comment>
+	<projects>
+	</projects>
+	<buildSpec>
+		<buildCommand>
+			<name>org.eclipse.cdt.managedbuilder.core.genmakebuilder</name>
+			<arguments>
+			</arguments>
+		</buildCommand>
+		<buildCommand>
+			<name>org.eclipse.cdt.managedbuilder.core.ScannerConfigBuilder</name>
+			<triggers>full,incremental,</triggers>
+			<arguments>
+			</arguments>
+		</buildCommand>
+	</buildSpec>
+	<natures>
+		<nature>com.ti.ccstudio.core.ccsNature</nature>
+		<nature>org.eclipse.cdt.core.cnature</nature>
+		<nature>org.eclipse.cdt.managedbuilder.core.managedBuildNature</nature>
+		<nature>org.eclipse.cdt.core.ccnature</nature>
+		<nature>org.eclipse.cdt.managedbuilder.core.ScannerConfigNature</nature>
+	</natures>
+	<variableList>
+		<variable>
+			<name>WORKSPACE_FASTRTS_c28</name>
+			<value>$%7BWORKSPACE_LOC%7D/AccGyroPro_YW_28335/ti/c2000/C2000Ware_1_00_03_00/libraries/math/FPUfastRTS/c28</value>
+		</variable>
+		<variable>
+			<name>WORKSPACE_IQMATH_c28</name>
+			<value>$%7BWORKSPACE_LOC%7D/AccGyroPro_YW_28335/ti/c2000/C2000Ware_1_00_03_00/libraries/math/IQmath/c28</value>
+		</variable>
+		<variable>
+			<name>WORKSPACE_TI_LIB</name>
+			<value>$%7BWORKSPACE_LOC%7D/AccGyroPro_YW_28335/ti/c2000/C2000Ware_1_00_03_00/device_support/f2833x</value>
+		</variable>
+	</variableList>
+</projectDescription>
