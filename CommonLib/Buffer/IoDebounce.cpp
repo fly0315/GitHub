@@ -33,38 +33,12 @@ IOBITS_64b IoDebounce::JitterControl(IOBITS_64b IOs)
 	/* 1. add into buffer for keep change status */
 	m_ChangedBitBuffer.Add(&ChangeBits, 1);
 	/* 2. loops depending on how many changed bits in data. */
-	/**	// search from LSB.
-	*	// loop number depending on the highest 1-bit index.
-	*  // abandoned for Inefficient. LiuBin.20181020
-	*	for (unsigned int i = 0; data; i++, data >>= 1)
-	*	{
-	*		if (data & 1)
-	*		{
-	*			m_TableOfChangeBit.Add(&i, 1);
-	*		}
-	*	}
-	*/
 	// the number of changed IO bits always not large 
 	// so make it outer loop and make sample depth inner loop .
 	// 	unsigned int n, offsetLen = 0;
 	while (ChangeBits)
 	{
 		/* 2.1.find the highest 1-bit. */
-		/**
-		* abandoned for Inefficient. liubin.20181027
-		// bi-search, starting from MSB (also can starting from LSB).
-		temp = ChangeBits;
-		n = 1;
-		if (0 == (temp >> 32)) { n += 32; temp <<= 32; }
-		if (0 == (temp >> 48)) { n += 16; temp <<= 16; }
-		if (0 == (temp >> 56)) { n += 8; temp <<= 8; }
-		if (0 == (temp >> 60)) { n += 4; temp <<= 4; }
-		if (0 == (temp >> 62)) { n += 2; temp <<= 2; }
-		n -= (temp >> 63);
-		TblElem = 63 - n - offsetLen;		// highest 1-bit index.
-		offsetLen += (n + 1);				// recode offset.
-		ChangeBits <<= (n + 1);
-		*/
 		temp = ChangeBits & (ChangeBits - 1);		// remove lowest 1-bit
 		LHB = ChangeBits - temp;					// find lowest 1-bit
 		// fast-log2(x)-search,starting from LSB.LiuBin.20181027.
@@ -79,7 +53,8 @@ IOBITS_64b IoDebounce::JitterControl(IOBITS_64b IOs)
 		/* 2.3.and toggle changed bit index */
 		if (sum >= *(m_FilterParameters.Threshold + bi))
 		{
-			m_OutPutValue ^= LHB;
+			// TODO: considering multi-thread safety - LiuBin. 20181124
+			m_OutPutValue ^= LHB; // Not safe for multi-thread mode.
 			for (nDepth = (*(m_FilterParameters.Depths + bi) - 1); nDepth; nDepth--)
 			{
 				m_ChangedBitBuffer.ReadBackAt(nDepth - 1, &CB);
