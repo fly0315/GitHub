@@ -28,6 +28,7 @@ extern "C" {
 	);
 	void GyroPowerup();
 	int16_t GetGyroRateX();
+	void AccStartup();
 
 #ifdef __cplusplus
 }

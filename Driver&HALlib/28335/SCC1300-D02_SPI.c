@@ -151,10 +151,27 @@ static void InitGpio_Spi_Gyro();
 static void InitGpio_Spi_Acc();
 static void spi_init();
 static void spi_fifo_init();
-static void spi_mcbspB_Acc();
+static void Init_mcbspB_Acc();
 __interrupt void spiTxFifoIsr(void);
 __interrupt void spiRxFifoIsr(void);
 
+static inline void SelectAcc() { GpioDataRegs.GPASET.bit.GPIO27 = 1;; }
+static inline void DeselectAcc() { GpioDataRegs.GPACLEAR.bit.GPIO27 = 1;; }
+//
+// delay_loop - 
+//
+ static void delay_loop(void)
+{
+	long      i;
+
+	//
+	// delay in McBsp init. must be at least 2 SRG cycles
+	//
+	for (i = 0; i < MCBSP_INIT_DELAY; i++)
+	{
+
+	}
+}
 unsigned int SCC1300_Init
 (
 // 	PIN CSB_G, PIN SCK_G, PIN MOSI_G, PIN MISO_G,
@@ -224,6 +241,7 @@ void InitSpi_Gyro()
 void InitSpi_Acc()
 {
 	InitGpio_Spi_Acc();
+	Init_mcbspB_Acc();
 }
 
 void InitGpio_Spi_Gyro()
@@ -335,9 +353,6 @@ void InitGpio_Spi_Acc()
 {
 	EALLOW;
 
-	//
-	// Configure McBSP-B pins using GPIO regs
-
 	GpioCtrlRegs.GPAMUX2.bit.GPIO24 = 3;        // GPIO24 is MDXB pin
 	GpioCtrlRegs.GPAMUX2.bit.GPIO25 = 3;        // GPIO25 is MDRB pin
 	GpioCtrlRegs.GPAMUX2.bit.GPIO26 = 3;        // GPIO26 is MCLKXB pin
@@ -369,79 +384,93 @@ void InitGpio_Spi_Acc()
 	GpioCtrlRegs.GPAQSEL2.bit.GPIO27 = 3;   // Asynch input GPIO27 (MFSXB)
 	GpioCtrlRegs.GPBQSEL2.bit.GPIO61 = 3; // Asynch input GPIO61 (MFSRB)
 
+	// set GPIO27 as output
+	GpioCtrlRegs.GPAMUX2.bit.GPIO27 = 0;	// set as GPIO
+	GpioCtrlRegs.GPAPUD.bit.GPIO27 = 0;		// Enable pull-up on
+	GpioCtrlRegs.GPADIR.bit.GPIO27 = 1;		// set as output mode
+	DeselectAcc();
+
 	EDIS;
 }
 
-void spi_mcbspB_Acc()
+void Init_mcbspB_Acc()
 {
 	//
 	// McBSP-B register settings
 	//
 
 	//
-	// Reset Receiver, Right justify word, Digital loopback dis.
+	// Reset Receiver, Right justify word,
 	//
 	McbspbRegs.SPCR1.all = 0x0000;
+
 	//
 	// Reset FS generator, sample rate generator & transmitter
 	//
 	McbspbRegs.SPCR2.all = 0x0000;
 
-	McbspbRegs.SPCR1.bit.DLB = 0;	// 0/1: loop back mode disable/enable
-	McbspbRegs.SPCR1.bit.RJUST = 0;	// 0: Right alignment, MSBs fill 0
-									// 1: Right alignment, MSBs fill symbol bits
-									// 2: left alignment, LSBs file 0
-									// 3: reserved
-	McbspbRegs.SPCR1.bit.CLKSTP = 3;// 时钟停止模式标志位。
-									// 0~1: 禁止时钟停止模式
-									// 2: 使能该模式，无时钟延时
-									// 3: 使能该模式，延时半个时钟。
-	McbspbRegs.SPCR1.bit.DXENA = 0;	// 外部DX引脚延时使能标志位
-									// 0: 延时禁止
-									// 1：延时使能
-	McbspbRegs.SPCR1.bit.RINTM = 0;	// 接收中断模式标志位，用来决定何种事件触发McBSP接收中断请求（RINT）
-									// 0: RRDY标志位为1，McBSP向CPU发送RINT
-									// 1: 
-
-	
-
-
 	//
 	// (CLKXM=CLKRM=FSXM=FSRM= 1, FSXP = 1)
 	//
-	McbspbRegs.PCR.all = 0x0F08;
-
-	McbspbRegs.SPCR1.bit.DLB = 1;
-
+	//    McbspbRegs.PCR.all=0x0F08;
+	McbspbRegs.PCR.bit.FSXM = 1;    // D11
+	McbspbRegs.PCR.bit.FSRM = 1;      // D10
+	McbspbRegs.PCR.bit.CLKXM = 1;    // D09 master mode
+	McbspbRegs.PCR.bit.CLKRM = 1;     // D08
+	McbspbRegs.PCR.bit.SCLKME = 0;  // D07
+	McbspbRegs.PCR.bit.DX_STAT = 0;   // D05
+	McbspbRegs.PCR.bit.DR_STAT = 0;   // D04
+	McbspbRegs.PCR.bit.FSXP = 1;      // D03
+	McbspbRegs.PCR.bit.FSRP = 0;      // D02
 	//
 	// Together with CLKXP/CLKRP determines clocking scheme
 	//
-	McbspbRegs.SPCR1.bit.CLKSTP = 2;
+	McbspbRegs.PCR.bit.CLKXP = 0;     // D01 ↑T
+	McbspbRegs.PCR.bit.CLKRP = 0;     // D00 ↓R
 
-	McbspbRegs.PCR.bit.CLKXP = 0;	 // CPOL = 0, CPHA = 0 rising edge no delay
-	McbspbRegs.PCR.bit.CLKRP = 0;
 
-	//
-	// FSX setup time 1 in master mode. 0 for slave mode (Receive)
-	//
-	McbspbRegs.RCR2.bit.RDATDLY = 01;
+	McbspbRegs.SPCR1.bit.DLB = 0;
+	McbspbRegs.SPCR1.bit.RJUST = 0;
+	McbspbRegs.SPCR1.bit.CLKSTP = 3;
+	McbspbRegs.SPCR1.bit.DXENA = 0;
+	McbspbRegs.SPCR1.bit.RINTM = 0;
+	McbspbRegs.SPCR1.bit.RSYNCERR = 0;
 
-	//
-	// FSX setup time 1 in master mode. 0 for slave mode (Transmit)
-	//
-	McbspbRegs.XCR2.bit.XDATDLY = 01;
+	McbspbRegs.RCR2.bit.RPHASE = 0;
+	McbspbRegs.RCR2.bit.RCOMPAND = 0;
+	McbspbRegs.RCR2.bit.RFIG = 0;
+	McbspbRegs.RCR2.bit.RDATDLY = 01; // FSX setup time 1 in master mode. 0 for slave mode (Receive)
 
-	McbspbRegs.RCR1.bit.RWDLEN1 = 5;   // 32-bit word
-	McbspbRegs.XCR1.bit.XWDLEN1 = 5;   // 32-bit word
+	McbspbRegs.XCR2.bit.XPHASE = 0;
+	McbspbRegs.XCR2.bit.XCOMPAND = 0;
+	McbspbRegs.XCR2.bit.XFIG = 0;
+	McbspbRegs.XCR2.bit.XDATDLY = 01; // FSX setup time 1 in master mode. 0 for slave mode (Transmit)
 
-	McbspbRegs.SRGR2.all = 0x2000; 	 // CLKSM=1, FPER = 1 CLKG periods
-	McbspbRegs.SRGR1.all = 0x000F;	 // Frame Width = 1 CLKG period, CLKGDV=16
+	McbspbRegs.XCR1.bit.XFRLEN1 = 0;
+	McbspbRegs.RCR1.bit.RFRLEN1 = 0;
+
+	InitMcbspb8bit();
+
+	//    McbspbRegs.SRGR2.all=0x2000;   // CLKSM=1, FPER = 1 CLKG periods
+	McbspbRegs.SRGR2.bit.GSYNC = 0;
+	McbspbRegs.SRGR2.bit.CLKSM = 1;
+	McbspbRegs.SRGR2.bit.FSGM = 0;
+	McbspbRegs.SRGR2.bit.FPER = 0;
+
+	//    McbspbRegs.SRGR1.all= 0x000F;  // Frame Width = 1 CLKG period, CLKGDV=16
+	McbspbRegs.SRGR1.bit.FWID = 0;
+	McbspbRegs.SRGR1.bit.CLKGDV = 36;
 
 	McbspbRegs.SPCR2.bit.GRST = 1;     // Enable the sample rate generator
 	delay_loop();                    // Wait at least 2 SRG clock cycles
 	McbspbRegs.SPCR2.bit.XRST = 1;     // Release TX from Reset
 	McbspbRegs.SPCR1.bit.RRST = 1;     // Release RX from Reset
 	McbspbRegs.SPCR2.bit.FRST = 1;     // Frame Sync Generator reset
+}
+
+void AccStartup()
+{
+
 }
 
 unsigned int GYRO_SPI(const GYRO_MOSI OP, GYRO_MISO *DATA)
