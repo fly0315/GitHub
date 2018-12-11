@@ -26,7 +26,7 @@ IoDebounce::~IoDebounce()
 IOBITS_64b IoDebounce::JitterControl(IOBITS_64b IOs)
 {
 	static IOBITS_64b ChangeBits;
-	static IOBITS_64b CB, temp, LHB;
+	static IOBITS_64b CB, /*temp,*/ LHB;
 	static unsigned int nDepth, bi, sum;
 	/* 0. find changed bits */
 	ChangeBits = (IOs ^ m_OutPutValue) & (~m_Mask);
@@ -39,10 +39,11 @@ IOBITS_64b IoDebounce::JitterControl(IOBITS_64b IOs)
 	while (ChangeBits)
 	{
 		/* 2.1.find the highest 1-bit. */
-		temp = ChangeBits & (ChangeBits - 1);		// remove lowest 1-bit
-		LHB = ChangeBits - temp;					// find lowest 1-bit
+// 		temp = ChangeBits & (ChangeBits - 1);		// remove lowest 1-bit
+// 		LHB = ChangeBits - temp;					// find lowest 1-bit
+		LHB = ChangeBits & -(int64_t)ChangeBits;	// find lowest 1-bit
 		// fast-log2(x)-search,starting from LSB.LiuBin.20181027.
-		ChangeBits = temp;							// prepare for next loop if any
+		ChangeBits -= LHB;							// prepare for next loop if any
 		/* 2.2.calculate sum with bit index */
 		bi = fastlog2_64b(LHB);						// lowest 1-bit index
 		for (nDepth = *(m_FilterParameters.Depths + bi), sum = 0; nDepth; nDepth--)

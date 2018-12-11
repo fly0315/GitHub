@@ -1,4 +1,5 @@
 #include "IoDebounce.h"
+// ²Î¿¼£º https://www.cnblogs.com/Five100Miles/p/8458380.html
 void main()
 {
 	/**

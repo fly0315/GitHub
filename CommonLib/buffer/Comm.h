@@ -53,7 +53,22 @@ inline unsigned int ParityEven_16b(UINT16 v)
 	return ParityTableEven_8b[p[0] ^ p[1]];
 
 }
-
+/*
+static unsigned int table[256];
+void InitTable()
+{
+    unsigned int n;
+    table[0] = 0;
+    for (int i = 0; i < 8; i++)
+    {
+        n = 1 << i;
+        for (int j = 0; j < n; j++)
+        {
+            table[n + j] = i;
+        }
+    }
+}
+*/
 #ifdef __cplusplus
 }
 #endif

@@ -40,16 +40,42 @@ typedef enum ST_T
 };
 
 /* More information see link: http://stereopsis.com/log2.html */
-inline long long fastlog2_64b(double x)
+inline int fastlog2_64b(volatile long double x)
 {
 	assert(x != 0);
-	return (long long((unsigned long long&)x >> 52) - 1023);
-}
+	/**
+	 * tms28335 as little-endian platforme
+	 */
+//    union
+//    {
+//        long double asDouble;
+//        uint16_t asInt[4];
+//    }n;
+//    n.asDouble = x;
+//    return (n.asInt[3] >> 4) - 1023;
 
-inline long fastlog2_32b(float x)
+    return ((int)(*(uint64_t*)&x >> 52) - 1023);
+}
+/*
+	For:
+	(int)x = 2^23 * log2((float)x) + 2^23 * (127 - m)
+	then we have:
+	long2((float)x) = (int)x >> 23 - 127
+*/
+inline int fastlog2_32b(volatile float x)
 {
 	assert(x != 0);
-	return (long((unsigned long&)x >> 23) - 127);
+	/**
+	 * tms28335 as little-endian platforme
+	 */
+//    union
+//    {
+//        long double asDouble;
+//        uint16_t asInt[2];
+//    }n;
+//    n.asDouble = x;
+//    return (n.asInt[1] >> 7) - 1023;
+	return ((int)(*(uint32_t*)&x >> 23) - 127);
 }
 
 inline bool Is_Power_Of_2(unsigned long n) { return (n != 0 && ((n & (n - 1)) == 0)); }
