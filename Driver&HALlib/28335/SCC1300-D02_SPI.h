@@ -11,10 +11,6 @@
 
 #include "DSP28x_Project.h"
 #include <stdint.h>
-#define PIN (volatile unsigned int*) 
-#define ENABLE 0
-#define DISABLE 1
-
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,8 +24,8 @@ extern "C" {
 	);
 	void GyroPowerup();
 	int16_t GetGyroRateX();
-	void AccStartup();
-
+	int AccStartup();
+	void ReadAccerations(int16_t* XAcc,int16_t* YAcc, int16_t* ZAcc);
 #ifdef __cplusplus
 }
 #endif /* extern "C" */

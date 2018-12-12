@@ -6,8 +6,8 @@
  */
 
 #include "SCC1300-D02_SPI.h"
-
 #include <assert.h>
+#include "buffer/RingBuffer.h"
 
  // SCC1300 version specific parameters, here SCC1300-D02
 #define GYRO_SENSITIVITY 50 // LSB/DPS
@@ -17,6 +17,21 @@
  // Accelerometer Registers
 #define ACC_REVID 0x00
 #define ACC_CTRL 0x01
+typedef union 
+{
+	uint16_t all;
+	struct  
+	{
+		unsigned int rsv : 1;
+		unsigned int ST_CFG : 1;
+		unsigned int MST : 1;
+		unsigned int ST : 1;
+		unsigned int rsv4 : 1;
+		unsigned int PDOW : 1;
+		unsigned int PORST : 1;
+		unsigned int rsv7 : 1;
+	}bits;
+}ACC_REG_CTRL;
 #define ACC_STATUS 0x02
 #define ACC_RESET 0x03
 #define ACC_X_LSB 0x04
@@ -31,7 +46,7 @@
 #define ACC_ID 0x27
  // Gyroscope Registers
 #define GYRO_RATE_X 0x00
-union GYRO_REG_RATEX
+typedef union 
 {
 	uint16_t all;
 	struct 
@@ -40,7 +55,7 @@ union GYRO_REG_RATEX
 		unsigned int S_OK : 1;
 		unsigned int RateX14 : 14;
 	}bits;
-};
+}GYRO_REG_RATEX;
 #define GYRO_IC_ID 0x07
 #define GYRO_STATUS 0x08
 typedef union
@@ -56,6 +71,16 @@ typedef union
 }GYRO_REG_STATUS;
 #define GYRO_TEMP 0x0A
 #define GYRO_DUMMY 0x00
+
+typedef union
+{
+	uint16_t data;
+	struct
+	{
+		unsigned L : 8;
+		unsigned H : 8;
+	}bit;
+}W2C;
  
 typedef union
 {
@@ -103,13 +128,34 @@ typedef struct
 
 typedef union
 {
-    uint16_t data;
-    struct
-    {
-        unsigned L: 8;
-        unsigned H: 8;
-    }bit;
-}W2C;
+	uint16_t all;
+	W2C DB;
+	struct 
+	{
+		unsigned int DATA : 8;	// D0~D7
+		unsigned int aPAR : 1;	// D8
+		unsigned int RW : 1;	// D9
+		unsigned int ADDR : 6;	// D11~D16
+	}bits;
+}ACC_MOSI;
+typedef union
+{
+	uint16_t all;
+	W2C DB;
+	struct  
+	{
+		unsigned int DATA : 8;
+		unsigned int dPAR : 1;
+		unsigned int fixed1 : 1;
+		unsigned int fixed0 : 1;
+		unsigned int SAT : 1;
+		unsigned int ST : 1;
+		unsigned int PORST : 1;
+		unsigned int FRME : 1;
+		unsigned int rsv : 1;
+	}bits;
+}ACC_MISO;
+
 static unsigned int ParityEven_16b(uint16_t v)
 {
 	static const unsigned int ParityTableEven_8b[256] =
@@ -125,6 +171,19 @@ static unsigned int ParityEven_16b(uint16_t v)
 
 }
 
+static unsigned int ParityEven_8b(uint16_t v)
+{
+	static const unsigned int ParityTableEven_8b[256] =
+	{
+#   define P2(n) n^1, n, n, n^1
+#   define P4(n) P2(n), P2(n^1), P2(n^1), P2(n)
+#   define P6(n) P4(n), P4(n^1), P4(n^1), P4(n)
+		P6(0), P6(1), P6(1), P6(0)
+	};
+	return ParityTableEven_8b[v&0xFF];
+
+}
+
 static unsigned int ParityCheck_u16(uint16_t data)
 {
 	return (ParityEven_16b(data & (~1)) == (data & 1));
@@ -134,6 +193,16 @@ static GYRO_MOSI Gyro_RateX, Gyro_Status, Gyro_Temp, Gyro_IC_ID, Gyro_Reset;
 static GYRO_MISO GD_RateX, GD_Status, GD_Temp, GD_IC_ID, GD_Reset;
 static GYRO_MOSI_MIX Gyro_mix;
 static GYRO_MISO_MIX GD_mix;
+
+static ACC_MOSI Acc_ReadIntStatus, Acc_ReadCtrl, Acc_WriteCtrl;
+static ACC_MISO AD_IntStatus, AD_Ctrl;
+
+static int16_t RateX;
+static RingBuffer Buffer_RateX(100,sizeof(uint16_t));
+static RingBuffer Buffer_AccX(100, sizeof(uint16_t));
+static RingBuffer Buffer_AccY(100, sizeof(uint16_t));
+static RingBuffer Buffer_AccZ(100, sizeof(uint16_t));
+
 static uint16_t GenGyroOpc(unsigned int Addr, unsigned int RW)
 {
 	GYRO_MOSI_OPC OPC;
@@ -144,6 +213,16 @@ static uint16_t GenGyroOpc(unsigned int Addr, unsigned int RW)
 	OPC.bits.ParOdd = ParityEven_16b(OPC.all);
 	return OPC.all;
 }
+static uint16_t GenAccOpc(unsigned int Addr, unsigned int RW, unsigned int data)
+{
+	ACC_MOSI OPC;
+	OPC.all = 0;
+	OPC.bits.ADDR = Addr;
+	OPC.bits.RW = RW;
+	OPC.bits.aPAR = ParityEven_8b(OPC.DB.bit.H);
+	OPC.bits.DATA = ((WRITE == RW) ? data : 0);
+	return OPC.all;
+}
 static void InitData();
 static void InitSpi_Gyro();
 static void InitSpi_Acc();
@@ -152,26 +231,17 @@ static void InitGpio_Spi_Acc();
 static void spi_init();
 static void spi_fifo_init();
 static void Init_mcbspB_Acc();
+//static uint8_t ACC_ReadRegister(uint8_t Address, uint8_t *Data);
+//static uint8_t ACC_WriteRegister(uint8_t Address, uint8_t Data);
 __interrupt void spiTxFifoIsr(void);
 __interrupt void spiRxFifoIsr(void);
 
-static inline void SelectAcc() { GpioDataRegs.GPASET.bit.GPIO27 = 1;; }
-static inline void DeselectAcc() { GpioDataRegs.GPACLEAR.bit.GPIO27 = 1;; }
+static inline void SelectAcc() { GpioDataRegs.GPACLEAR.bit.GPIO27 = 1; }
+static inline void DeselectAcc() { GpioDataRegs.GPASET.bit.GPIO27 = 1; }
 //
 // delay_loop - 
 //
- static void delay_loop(void)
-{
-	long      i;
 
-	//
-	// delay in McBsp init. must be at least 2 SRG cycles
-	//
-	for (i = 0; i < MCBSP_INIT_DELAY; i++)
-	{
-
-	}
-}
 unsigned int SCC1300_Init
 (
 // 	PIN CSB_G, PIN SCK_G, PIN MOSI_G, PIN MISO_G,
@@ -182,7 +252,7 @@ unsigned int SCC1300_Init
 	InitData();
 
 	InitSpi_Gyro();
-
+	InitSpi_Acc();
 	/*
 
 	// Disable and clear all CPU interrupts
@@ -210,6 +280,16 @@ unsigned int SCC1300_Init
 
 void InitData()
 {
+	uint16_t i = 0;
+	Buffer_RateX.Initialize();
+ 	Buffer_RateX.SetAll(&i);
+	Buffer_AccX.Initialize();
+	Buffer_AccX.SetAll(&i);
+	Buffer_AccY.Initialize();
+	Buffer_AccY.SetAll(&i);
+	Buffer_AccZ.Initialize();
+	Buffer_AccZ.SetAll(&i);
+	
 	Gyro_RateX.opc.all = GenGyroOpc(GYRO_RATE_X, READ);
 	Gyro_RateX.data.all = GenGyroOpc(GYRO_DUMMY, READ);
 
@@ -228,6 +308,10 @@ void InitData()
 	Gyro_mix.rateX_OPC.all = GenGyroOpc(GYRO_RATE_X, READ);
 	Gyro_mix.Temp_OPC.all = GenGyroOpc(GYRO_TEMP, READ);
 	Gyro_mix.DUMMY.all = GenGyroOpc(GYRO_DUMMY, READ);
+
+	Acc_ReadIntStatus.all = GenAccOpc(ACC_INT_STATUS, READ, 0);
+	Acc_ReadCtrl.all = GenAccOpc(ACC_CTRL, READ, 0);
+	Acc_WriteCtrl.all = GenAccOpc(ACC_CTRL, WRITE, 0);
 }
 
 void InitSpi_Gyro()
@@ -468,10 +552,59 @@ void Init_mcbspB_Acc()
 	McbspbRegs.SPCR2.bit.FRST = 1;     // Frame Sync Generator reset
 }
 
-void AccStartup()
+int AccStartup()
 {
+	int flag = 1;
+	SelectAcc();
+	McbspbRegs.DXR1.all = Acc_ReadIntStatus.DB.bit.H;
+	while (!McbspbRegs.SPCR1.bit.RRDY) { ; }
+	AD_IntStatus.DB.bit.H = McbspbRegs.DRR1.all;
 
+	McbspbRegs.DXR1.all = Acc_ReadIntStatus.DB.bit.L;
+	while (!McbspbRegs.SPCR1.bit.RRDY) { ; }
+	AD_IntStatus.DB.bit.L = McbspbRegs.DRR1.all;
+	DeselectAcc();
+
+	if (AD_IntStatus.bits.ST) { flag = 0; }
+
+	SelectAcc();
+	McbspbRegs.DXR1.all = Acc_WriteCtrl.DB.bit.H;
+	while (!McbspbRegs.SPCR1.bit.RRDY) { ; }
+	AD_Ctrl.DB.bit.H = McbspbRegs.DRR1.all;
+
+	McbspbRegs.DXR1.all = Acc_WriteCtrl.DB.bit.L;
+	while (!McbspbRegs.SPCR1.bit.RRDY) { ; }
+	AD_Ctrl.DB.bit.L = McbspbRegs.DRR1.all;
+	DeselectAcc();
+
+	if (AD_Ctrl.bits.fixed0 || !AD_Ctrl.bits.fixed1) { flag = 0; }
+	DELAY_US(10000);
+
+	SelectAcc();
+	McbspbRegs.DXR1.all = Acc_ReadCtrl.DB.bit.H;
+	while (!McbspbRegs.SPCR1.bit.RRDY) { ; }
+	AD_Ctrl.DB.bit.H = McbspbRegs.DRR1.all;
+
+	McbspbRegs.DXR1.all = Acc_ReadCtrl.DB.bit.L;
+	while (!McbspbRegs.SPCR1.bit.RRDY) { ; }
+	AD_Ctrl.DB.bit.L = McbspbRegs.DRR1.all;
+	DeselectAcc();
+
+	ACC_REG_CTRL AccCtrlReg;
+	AccCtrlReg.all = AD_Ctrl.DB.bit.L;
+	if (!AccCtrlReg.bits.ST || AccCtrlReg.bits.ST_CFG 
+		|| AD_Ctrl.bits.fixed0 || !AD_Ctrl.bits.fixed1
+		|| AD_Ctrl.bits.FRME || AD_Ctrl.bits.PORST
+		|| AD_Ctrl.bits.ST || AD_Ctrl.bits.SAT
+		)
+	{
+		flag = 0;
+	}
+	flag = 1;
+	return flag;
 }
+
+
 
 unsigned int GYRO_SPI(const GYRO_MOSI OP, GYRO_MISO *DATA)
 {
@@ -493,12 +626,11 @@ unsigned int GYRO_SPI(const GYRO_MOSI OP, GYRO_MISO *DATA)
 }
 
 void GyroPowerup()
-
 {
+	GYRO_REG_STATUS gyroStatusReg;
 	// Wait 800 ms
 	// always delay in application.
-    int i;
-    for (i = 0; i < 1000; i++)
+    for (int i = 0; i < 1000; i++)
     {
         DELAY_US(800);
     }
@@ -512,12 +644,13 @@ void GyroPowerup()
 	{
 		// Gyro error
 		GYRO_SPI(Gyro_Status, &GD_Status);				// Read status register to clear error flags
-		for (i = 0; i < 100; i++)
+		for (int i = 0; i < 100; i++)
         {
             DELAY_US(600);
         }
 		GYRO_SPI(Gyro_Status, &GD_Status);				// Read status register to clear flags again
-		if (!(((GYRO_REG_STATUS)GD_Status.data.bits.D14).bits.oddParity))
+		gyroStatusReg.all = GD_Status.data.bits.D14;
+		if (!(gyroStatusReg.bits.oddParity))
 		{
 			// If LOOPF still fails, reset gyroscope
 		    GYRO_SPI(Gyro_Reset, &GD_Reset);            // Perform soft reset
@@ -530,7 +663,9 @@ void GyroPowerup()
 int16_t GetGyroRateX()
 {
 	GYRO_SPI(Gyro_RateX, &GD_RateX);
-	return ((int16_t)GD_RateX.data.all >> 2);
+	RateX = ((int16_t)GD_RateX.data.all >> 2);
+	Buffer_RateX.Add(&RateX, 1);
+	return RateX;
 }
 
 unsigned int GetGyroMixAccess(int16_t RateX,int16_t Temp)
@@ -549,6 +684,30 @@ unsigned int GetGyroMixAccess(int16_t RateX,int16_t Temp)
 	GD_mix.rateX.all = SpiaRegs.SPIRXBUF;
 	GD_mix.temperature.all = SpiaRegs.SPIRXBUF;             // Read RX buffer(data word)
 	return 1;
+}
+
+void ReadAccerations(int16_t* XAcc, int16_t* YAcc, int16_t* ZAcc)
+{
+	int i;
+	static uint16_t sdata[7] = { 0x25,0,0,0,0,0,0 };
+	static uint16_t rdata[7] = { 0,0,0,0,0,0,0 };
+	SelectAcc();
+	for (i = 0; i < 7; i++)
+	{
+		//            while (!McbspbRegs.SPCR2.bit.XRDY) {;}
+		McbspbRegs.DXR1.all = sdata[i];
+		while (!McbspbRegs.SPCR1.bit.RRDY) { ; }
+		rdata[i] = McbspbRegs.DRR1.all;
+	}
+	DeselectAcc();
+
+	*ZAcc = (int16_t)((rdata[1] << 8) + rdata[2]) >> 1;
+	*YAcc = (int16_t)((rdata[3] << 8) + rdata[4]) >> 1;
+	*XAcc = (int16_t)((rdata[5] << 8) + rdata[6]) >> 1;
+
+	Buffer_AccX.Add(XAcc, 1);
+	Buffer_AccY.Add(YAcc, 1);
+	Buffer_AccZ.Add(ZAcc, 1);
 }
 
 //

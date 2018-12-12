@@ -163,6 +163,11 @@ public:
 	{
 		return PutIn_t(src, nLen_t);
 	}
+
+	inline void SetAll(const void *src) 
+	{ 
+		while (FULL != m_State) { Add(src, 1); }
+	}
 	
 	inline unsigned int PickFront(void *dest, unsigned int nLen_t)
 	{
